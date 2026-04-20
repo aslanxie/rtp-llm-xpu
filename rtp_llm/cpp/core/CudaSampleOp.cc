@@ -280,7 +280,7 @@ void chainSpeculativeSampling(const SpeculativeSamplingParams& params) {
                                int64_t(stream));
 }
 
-#else  // !USING_CUDA — ROCm platform
+#elif USING_ROCM  // ROCm platform
 
 }  // namespace rtp_llm — temporarily close for includes
 
@@ -527,6 +527,144 @@ void chainSpeculativeSampling(const SpeculativeSamplingParams& params) {
                                  int64_t(stream));
 }
 
-#endif  // USING_CUDA
+
+#elif USING_XPU  // XPU platform — pure PyTorch sampling
+
+torch::Device getTorchDevice();
+
+GreedyOutput sampleGreedy(const GreedyParams& params) {
+    const auto batch_size        = params.logits.size(0);
+    const auto vocab_size_padded = params.logits.size(1);
+    const auto step              = params.step;
+    auto       device            = getTorchDevice();  // returns torch::kXPU
+
+    // [batch_size, step + 1] → GPU
+    auto device_tokens     = params.token_ids.to(device);
+    auto transposed_tokens = device_tokens.transpose(0, 1).contiguous();
+
+    // 1. Temperature
+    if (std::any_of(params.temperature.data_ptr<float>(),
+                    params.temperature.data_ptr<float>() + batch_size,
+                    [](float t) { return t != 1.0f; })) {
+        for (int64_t b = 0; b < batch_size; b++) {
+            float t = params.temperature.data_ptr<float>()[b];
+            if (t != 1.0f && t > 0.0f) {
+                params.logits[b].div_(t);
+            }
+        }
+    }
+
+    // 2. Repetition / presence / frequency penalty
+    if (params.repetition_penalty.has_value()) {
+        const auto& rep_pen  = params.repetition_penalty.value();
+        const auto& pres_pen = params.presence_penalty.value();
+        const auto& freq_pen = params.frequency_penalty.value();
+        for (int64_t b = 0; b < batch_size; b++) {
+            float rp = rep_pen.data_ptr<float>()[b];
+            float pp = pres_pen.data_ptr<float>()[b];
+            float fp = freq_pen.data_ptr<float>()[b];
+            if (rp == 1.0f && pp == 0.0f && fp == 0.0f) continue;
+            auto row = params.logits[b];
+            auto past_tokens = transposed_tokens.slice(0, 0, step + 1).select(1, b);
+            auto unique_tokens = std::get<0>(at::_unique(past_tokens));
+            auto scores = row.index_select(0, unique_tokens);
+            if (rp != 1.0f) {
+                auto pos_mask = scores > 0;
+                scores = torch::where(pos_mask, scores / rp, scores * rp);
+            }
+            if (pp != 0.0f) scores = scores - pp;
+            if (fp != 0.0f) {
+                // Count frequency of each token
+                for (int64_t t = 0; t < unique_tokens.size(0); t++) {
+                    int tok = unique_tokens[t].template item<int>();
+                    int count = 0;
+                    auto pt_ptr = past_tokens.template data_ptr<int32_t>();
+                    for (int64_t s = 0; s <= step; s++) {
+                        if (pt_ptr[s] == tok) count++;
+                    }
+                    scores[t] = scores[t] - fp * count;
+                }
+            }
+            row.index_copy_(0, unique_tokens, scores);
+        }
+    }
+
+    // 3. Top-k=1 fast path (greedy argmax)
+    auto top_k_ptr = reinterpret_cast<uint32_t*>(params.top_k.data_ptr<int32_t>());
+    if (std::all_of(top_k_ptr, top_k_ptr + batch_size, [](uint32_t t) { return t == 1; })
+        && !params.output_all_probs.has_value()) {
+        auto samples_t      = transposed_tokens.slice(0, step, step + 1).squeeze(0);
+        auto selected       = torch::argmax(params.logits, -1, false);
+        samples_t.copy_(selected);
+        params.token_ids.copy_(transposed_tokens.transpose(0, 1).contiguous());
+        return GreedyOutput{};
+    }
+
+    // 4. Softmax → probabilities
+    auto probs_t = torch::softmax(params.logits, -1);
+    params.logits.copy_(probs_t);
+
+    // 5. Apply top_k filtering
+    auto filtered_probs = probs_t;
+    bool has_top_k = !std::all_of(top_k_ptr, top_k_ptr + batch_size, [](uint32_t t) { return t <= 0; });
+    if (has_top_k) {
+        for (int64_t b = 0; b < batch_size; b++) {
+            int k = top_k_ptr[b] <= 0 ? vocab_size_padded : top_k_ptr[b];
+            if ((int64_t)k < vocab_size_padded) {
+                auto row                    = filtered_probs[b];
+                auto [topk_vals, topk_inds] = row.topk(k);
+                auto min_val                = topk_vals[-1];
+                row.masked_fill_(row < min_val, 0.0f);
+            }
+        }
+    }
+
+    // 6. Apply top_p filtering
+    auto top_p_ptr = params.top_p.data_ptr<float>();
+    std::transform(top_p_ptr, top_p_ptr + batch_size, top_p_ptr, [](float t) { return std::abs(t) < 1e-7f ? 1.0f : t; });
+    bool has_top_p = !std::all_of(top_p_ptr, top_p_ptr + batch_size, [](float t) { return std::abs(t - 1.0f) < 1e-7f; });
+    if (has_top_p) {
+        for (int64_t b = 0; b < batch_size; b++) {
+            float p = top_p_ptr[b];
+            if (std::abs(p - 1.0f) >= 1e-7f) {
+                auto row                            = filtered_probs[b];
+                auto [sorted_probs, sorted_indices] = row.sort(true);
+                auto cumsum                         = sorted_probs.cumsum(0);
+                auto mask                           = cumsum - sorted_probs > p;
+                sorted_probs.masked_fill_(mask, 0.0f);
+                row.scatter_(0, sorted_indices, sorted_probs);
+            }
+        }
+    }
+
+    // 7. Re-normalize and sample
+    auto row_sums  = filtered_probs.sum(-1, true);
+    filtered_probs = filtered_probs / row_sums.clamp_min(1e-10f);
+    auto selected  = torch::multinomial(filtered_probs, 1, false).squeeze(-1);
+
+    auto samples_t = transposed_tokens.slice(0, step, step + 1).squeeze(0);
+    samples_t.copy_(selected);
+
+    bool need_output_all_probs = params.output_all_probs.has_value();
+    if (need_output_all_probs) {
+        params.output_all_probs.value().copy_(filtered_probs);
+    }
+
+    // 8. Update cum_log_probs
+    if (params.cum_log_probs.has_value()) {
+        params.cum_log_probs.value().add_(probs_t.log());
+    }
+
+    // 9. Copy back
+    params.token_ids.copy_(transposed_tokens.transpose(0, 1).contiguous());
+    return GreedyOutput{};
+}
+
+void chainSpeculativeSampling(const SpeculativeSamplingParams& params) {
+    RTP_LLM_CHECK_WITH_INFO(false, "speculative sampling is not supported on XPU yet");
+}
+
+
+#endif  // USING_CUDA / USING_ROCM / USING_XPU
 
 }  // namespace rtp_llm

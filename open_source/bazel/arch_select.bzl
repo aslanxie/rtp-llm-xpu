@@ -4,6 +4,7 @@ load("@pip_arm_torch//:requirements.bzl", requirement_arm="requirement")
 load("@pip_gpu_cuda12_torch//:requirements.bzl", requirement_gpu_cuda12="requirement")
 load("@pip_gpu_cuda12_9_torch//:requirements.bzl", requirement_gpu_cuda12_9="requirement")
 load("@pip_gpu_rocm_torch//:requirements.bzl", requirement_gpu_rocm="requirement")
+load("@pip_xpu_torch//:requirements.bzl", requirement_xpu="requirement")
 load("//bazel:defs.bzl", "copy_so")
 
 def copy_all_so():
@@ -28,14 +29,24 @@ def copy_all_so():
     copy_so("@flashinfer_cpp//:flashinfer_sm90")
     copy_so("@deep_ep//:deep_ep_cu")
 
+# Packages not available in XPU pip environment (CUDA/ROCm-only).
+_XPU_EXCLUDED_PACKAGES = [
+    "pynvml", "cpm_kernels", "xfastertransformer_devel",
+    "xfastertransformer_devel_icx", "decord", "onnx", "bitsandbytes",
+    "pyrsmi", "amdsmi", "fast-safetensors", "blobfile", "pyOpenSSL",
+    "pyarrow", "pyodps", "matplotlib",
+]
+
 def requirement(names):
     for name in names:
+        xpu_dep = [] if name in _XPU_EXCLUDED_PACKAGES else [requirement_xpu(name)]
         native.py_library(
             name = name,
             deps = select({
                 "@//:cuda_pre_12_9": [requirement_gpu_cuda12(name)],
                 "@//:using_cuda12_9_x86": [requirement_gpu_cuda12_9(name)],
                 "@//:using_rocm": [requirement_gpu_rocm(name)],
+                "@//:using_xpu": xpu_dep,
                 "@//:using_arm": [requirement_arm(name)],
                 "//conditions:default": [requirement_cpu(name)],
             }),
@@ -76,6 +87,7 @@ def whl_deps():
     return select({
         "@//:using_cuda12": ["torch==2.6.0+cu126"],
         "@//:using_rocm": ["pyrsmi==0.2.0", "amdsmi@https://sinian-metrics-platform.oss-cn-hangzhou.aliyuncs.com/kis%2FAMD%2Famd_smi%2Fali%2Famd_smi.tar", "aiter@https://sinian-metrics-platform.oss-cn-hangzhou.aliyuncs.com/kis/AMD/RTP/aiter-0.1.11%2Bgit.371a22f0.date.202601191515-cp310-cp310-linux_x86_64.whl"],
+        "@//:using_xpu": ["torch==2.10.0+xpu"],
         "//conditions:default": ["torch==2.1.2"],
     })
 
@@ -93,6 +105,11 @@ def torch_deps():
             "@torch_rocm//:torch_api",
             "@torch_rocm//:torch",
             "@torch_rocm//:torch_libs",
+        ],
+        "@//:using_xpu": [
+            "@torch_xpu//:torch_api",
+            "@torch_xpu//:torch",
+            "@torch_xpu//:torch_libs",
         ],
         "@//:using_arm": [
             "@torch_2.3_py310_cpu_aarch64//:torch_api",
@@ -156,6 +173,7 @@ def kernel_so_deps():
     return select({
         "@//:using_cuda": [":libfa_so", ":libfpA_intB_so", ":libint8_gemm_so", ":libmoe_so", ":libmoe_sm90_so", ":libflashinfer_single_prefill_so", ":libflashinfer_single_decode_so", ":libflashinfer_batch_paged_prefill_so", ":libflashinfer_batch_paged_decode_so", ":libflashinfer_batch_ragged_prefill_so", ":libflashinfer_sm90_so", ":libflashinfer_single_prefill_256_so", ":libflashinfer_single_decode_256_so", ":libflashinfer_batch_paged_prefill_256_so", ":libflashinfer_batch_paged_decode_256_so", ":libflashinfer_batch_ragged_prefill_256_so"],
         "@//:using_rocm": [],
+        "@//:using_xpu": [],
         "//conditions:default":[],
     })
 
@@ -200,6 +218,9 @@ def select_py_bindings():
         ],
         "//:using_rocm": [
             "//rtp_llm/models_py/bindings/rocm:rocm_bindings_register"
+        ],
+        "//:using_xpu": [
+            "//rtp_llm/models_py/bindings/xpu:xpu_bindings_register",
         ],
         "//conditions:default": [
             "//rtp_llm/models_py/bindings:dummy_register",

@@ -14,6 +14,9 @@
 using DeviceGuard = at::cuda::CUDAGuard;
 #elif USING_ROCM
 using DeviceGuard = c10::hip::HIPGuardMasqueradingAsCUDA;
+#elif USING_XPU
+struct XpuDeviceGuard { explicit XpuDeviceGuard(int) {} };
+using DeviceGuard = XpuDeviceGuard;
 #endif
 
 namespace rtp_llm {
@@ -99,7 +102,7 @@ void clearProcessGroups() {
 // ============================================================
 
 static at::Tensor ensureCuda(const at::Tensor& t, int device_id) {
-    if (t.is_cuda())
+    if (t.is_cuda() || t.is_xpu())
         return t;
     return t.to(at::Device(at::kCUDA, device_id));
 }
@@ -115,7 +118,7 @@ void c10dBroadcast(const BroadcastParams& params) {
 
     DeviceGuard guard(entry.device_id);
     for (auto& buffer : params.buffers) {
-        bool                    on_cpu  = !buffer.is_cuda();
+        bool                    on_cpu  = !buffer.is_cuda() && !buffer.is_xpu();
         at::Tensor              gpu_buf = on_cpu ? buffer.to(at::Device(at::kCUDA, entry.device_id), true) : buffer;
         std::vector<at::Tensor> tensors = {gpu_buf};
         c10d::BroadcastOptions  opts;
@@ -146,7 +149,7 @@ AllReduceOutput c10dAllReduce(const AllReduceParams& params) {
         dest_buffer.copy_(buffer);
     }
 
-    bool                    on_cpu  = !dest_buffer.is_cuda();
+    bool                    on_cpu  = !dest_buffer.is_cuda() && !dest_buffer.is_xpu();
     at::Tensor              gpu_buf = on_cpu ? dest_buffer.to(at::Device(at::kCUDA, entry.device_id)) : dest_buffer;
     std::vector<at::Tensor> tensors = {gpu_buf};
     c10d::AllreduceOptions  opts;
@@ -178,7 +181,7 @@ void c10dAllGather(const AllGatherParams& params) {
                               static_cast<size_t>(recv_buffer.numel()),
                               entry.world_size);
 
-        bool       recv_on_cpu = !recv_buffer.is_cuda();
+        bool       recv_on_cpu = !recv_buffer.is_cuda() && !recv_buffer.is_xpu();
         at::Tensor gpu_recv    = recv_on_cpu ? recv_buffer.to(at::Device(at::kCUDA, entry.device_id)) : recv_buffer;
 
         auto gpu_recv_flat = gpu_recv.reshape({-1});

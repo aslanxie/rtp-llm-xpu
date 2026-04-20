@@ -4,7 +4,30 @@ load("//:def.bzl", "copts")
 
 cc_library(
     name = "common",
-    srcs = glob(["*.cc"]),
+    srcs = glob(
+        ["*.cc"],
+        exclude = [
+            "CudaGraphPrefillCopy.cc",
+            "FusedQKRmsNorm.cc",
+            "RtpEmbeddingLookup.cc",
+            "RtpNorm.cc",
+        ],
+    ) + select({
+        "//:using_cuda": [
+            "CudaGraphPrefillCopy.cc",
+            "FusedQKRmsNorm.cc",
+            "RtpEmbeddingLookup.cc",
+            "RtpNorm.cc",
+        ],
+        "//:using_rocm": [
+            "CudaGraphPrefillCopy.cc",
+            "FusedQKRmsNorm.cc",
+            "RtpEmbeddingLookup.cc",
+            "RtpNorm.cc",
+        ],
+        "//:using_xpu": [],
+        "//conditions:default": [],
+    }),
     hdrs = glob(["*.h"]),
     deps = [
         "//rtp_llm/models_py/bindings:op_defs",
@@ -20,6 +43,7 @@ cc_library(
             "//rtp_llm/models_py/bindings/common/kernels:kernels_cu",
             "//rtp_llm/cpp/core:exec_ctx_rocm",
         ],
+        "//:using_xpu": [],
         "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],

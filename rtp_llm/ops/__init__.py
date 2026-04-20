@@ -12,6 +12,11 @@ parent_dir = os.path.dirname(current_dir)
 libs_path = os.path.join(parent_dir, "libs")
 SO_NAME = "libth_transformer_config.so"
 
+# XPU C++ engine support: detect Intel GPU
+_xpu_mode = hasattr(torch, 'xpu') and torch.xpu.is_available()
+if _xpu_mode:
+    logging.info("XPU mode: using C++ engine with built .so libraries")
+
 
 # for py test
 def find_upper_so(current_dir: str):
@@ -105,7 +110,12 @@ except BaseException as e:
 import sysconfig
 from ctypes import cdll
 
-cdll.LoadLibrary(sysconfig.get_config_var("LIBDIR") + "/libpython3.10.so")
+_pylib = f"libpython{sys.version_info.major}.{sys.version_info.minor}.so"
+_pylib_path = os.path.join(sysconfig.get_config_var("LIBDIR"), _pylib)
+if os.path.exists(_pylib_path):
+    cdll.LoadLibrary(_pylib_path)
+else:
+    logging.warning(f"Could not find {_pylib_path}, shared lib loading may fail")
 
 try:
     from libth_transformer_config import (

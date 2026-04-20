@@ -137,13 +137,21 @@ BeamSearchOutput sampleBeamSearch(const BeamSearchParams& params) {
 #undef DISPATCH_BOOL
 }
 
-#else  // !USING_CUDA — ROCm platform
+#elif USING_ROCM  // ROCm platform
 
 BeamSearchOutput sampleBeamSearch(const BeamSearchParams& params) {
     RTP_LLM_CHECK_WITH_INFO(false, "beam search is not supported on ROCm yet");
     return BeamSearchOutput({});
 }
 
-#endif  // USING_CUDA
+
+#elif USING_XPU  // XPU platform
+
+BeamSearchOutput sampleBeamSearch(const BeamSearchParams& params) {
+    RTP_LLM_CHECK_WITH_INFO(false, "beam search is not supported on XPU yet");
+    return BeamSearchOutput({});
+}
+
+#endif  // USING_CUDA / USING_ROCM / USING_XPU
 
 }  // namespace rtp_llm

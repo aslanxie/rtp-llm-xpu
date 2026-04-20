@@ -72,3 +72,5 @@ git.diff
 .doctrees/
 node_modules/
 docs/index/dist/
+rtp_llm/libs/*.so
+xpu-aligned-vs-upstream-main.patch

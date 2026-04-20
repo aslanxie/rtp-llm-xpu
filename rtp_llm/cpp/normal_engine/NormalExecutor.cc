@@ -87,7 +87,9 @@ NormalExecutor::NormalExecutor(const EngineInitParams&                params,
         RTP_LLM_LOG_INFO("init executor with test model factory");
         model_ = test_model_factory(model_init_params);
     } else {
-        RTP_LLM_LOG_WARNING("py_model is None — model will not be initialized (test mode)");
+        RTP_LLM_CHECK_WITH_INFO(false,
+            "py_model must be provided, legacy C++ GptModel path removed. "
+            "Please set LOAD_PYTHON_MODEL=1 (the default) to use the Python model path.");
     }
 
     // when warmup, cache manager maybe nullptr

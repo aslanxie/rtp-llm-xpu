@@ -7,6 +7,9 @@
 #elif USING_ROCM
 #include <hip/hip_runtime.h>
 #include "rtp_llm/cpp/rocm/hip_host_utils.h"
+#elif USING_XPU
+#include <ATen/xpu/XPUContext.h>
+#include <c10/xpu/XPUCachingAllocator.h>
 #endif
 
 #include "rtp_llm/cpp/core/ExecOps.h"
@@ -14,6 +17,7 @@
 #if USING_CUDA
 #include "rtp_llm/cpp/cuda/cuda_host_utils.h"
 #endif
+// XPU: no additional includes needed, uses PyTorch API
 
 namespace rtp_llm {
 
@@ -59,6 +63,15 @@ size_t MemoryEvaluationHelper::getDefaultRuntimeMemorySize(const RuntimeConfig& 
     check_cuda_value(cudaMemGetInfo(&free_gpu_bytes, &total_gpu_bytes));
 #elif USING_ROCM
     ROCM_CHECK(hipMemGetInfo(&free_gpu_bytes, &total_gpu_bytes));
+#elif USING_XPU
+    // XPU: query via SYCL backend
+    {
+        auto* props = at::xpu::getDeviceProperties(0);
+        total_gpu_bytes = props->global_mem_size;
+        auto stats = c10::xpu::XPUCachingAllocator::getDeviceStats(0);
+        size_t used = stats.allocated_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].current;
+        free_gpu_bytes = (total_gpu_bytes > used) ? (total_gpu_bytes - used) : 0;
+    }
 #endif
     const auto minimal_runtime_bytes = std::max(2048L * 1024 * 1024, (long)(total_gpu_bytes * 0.05));
     if (reserve_runtime_mem_bytes < minimal_runtime_bytes) {

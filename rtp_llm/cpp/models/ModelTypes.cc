@@ -102,7 +102,7 @@ void tpSyncModelInputs(GptModelInputs& inputs, const ParallelismConfig& parallel
         auto torch_dtype = dataTypeToTorchType(dtype);
         auto options     = torch::TensorOptions(torch_dtype);
         if (atype == rtp_llm::AllocationType::DEVICE) {
-            options = options.device(torch::kCUDA);
+            options = options.device(getTorchDevice());
         }
         std::vector<int64_t> dims64(dims.begin(), dims.end());
         auto                 tensor = torch::empty(dims64, options);
@@ -176,7 +176,7 @@ void tpSyncModelInputs(GptModelInputs& inputs, const ParallelismConfig& parallel
             for (auto mm_index = 0; mm_index < mm_features_num; ++mm_index) {
                 mm_features.emplace_back(torch::empty({(int64_t)mm_features_shape_ptr[mm_index],
                                                        (int64_t)shape_hints_ptr[GptModelInputIndex::mmFeaturesSize]},
-                                                      torch::TensorOptions().dtype(mm_dtype).device(torch::kCUDA)));
+                                                      torch::TensorOptions().dtype(mm_dtype).device(getTorchDevice())));
             }
             inputs.multimodal_features = std::move(mm_features);
         }
@@ -276,7 +276,7 @@ void tpSyncModelInputs(GptModelInputs& inputs, const ParallelismConfig& parallel
     }
 
     if (gpu_total_bytes > 0) {
-        gpu_packed = torch::empty({gpu_total_bytes}, torch::TensorOptions(torch::kUInt8).device(torch::kCUDA));
+        gpu_packed = torch::empty({gpu_total_bytes}, torch::TensorOptions(torch::kUInt8).device(getTorchDevice()));
         if (is_root) {
             for (auto& e : gpu_entries) {
                 auto contig    = e.tensor->contiguous();

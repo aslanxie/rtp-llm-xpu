@@ -116,9 +116,13 @@ inline PyWrappedModel::PyWrappedModel(const GptModelInitParams& params,
     model_id_              = params.model_id;
     kv_cache_layer_layout_ = params.kv_cache_layer_layout;
     if (abs(description_.residual_scalar - 1.0) > 1e-6) {
-        auto residual_tensor = torch::tensor({(float)description_.residual_scalar}, torch::kFloat32).cuda();
+        auto residual_tensor = torch::tensor({(float)description_.residual_scalar}, torch::kFloat32).to(getTorchDevice());
 #if USING_CUDA
         c10::cuda::getCurrentCUDAStream().synchronize();
+#elif USING_XPU
+        // XPU: use torch synchronize through device guard
+        c10::impl::VirtualGuardImpl impl(c10::DeviceType::XPU);
+        impl.synchronizeStream(impl.getStream(c10::Device(c10::DeviceType::XPU)));
 #endif
         residual_scale_fp32_ = residual_tensor;
         residual_scale_      = residual_tensor.to(dataTypeToTorchType(description_.data_type));

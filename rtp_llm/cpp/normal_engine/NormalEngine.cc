@@ -21,6 +21,8 @@
 
 #if USING_CUDA
 #include "c10/cuda/CUDACachingAllocator.h"
+#elif USING_XPU
+#include <c10/xpu/XPUCachingAllocator.h>
 #endif
 
 #ifdef __linux__
@@ -69,7 +71,11 @@ NormalEngine::NormalEngine(const EngineInitParams&                       params,
     // GPU 0. Set the correct device so all GPU allocations (KV cache, etc.) go
     // to the right device.  The guard is scoped to the constructor body.
     c10::DeviceGuard ctor_device_guard(
+#if USING_XPU
+        c10::Device(c10::kXPU, static_cast<c10::DeviceIndex>(parallelism_config.local_rank)));
+#else
         c10::Device(c10::kCUDA, static_cast<c10::DeviceIndex>(parallelism_config.local_rank)));
+#endif
     RTP_LLM_LOG_INFO("ROCm NormalEngine ctor: set device to %d", parallelism_config.local_rank);
 #endif
 
@@ -214,8 +220,8 @@ std::shared_ptr<GenerateInput> NormalEngine::makeFakeInput(size_t seq_len) {
 }
 
 WarmUpResult NormalEngine::prefillWarmUp(const EngineInitParams& params) {
-#if !USING_CUDA
-    RTP_LLM_FAIL("prefillWarmUp is not supported on non-CUDA platforms");
+#if !USING_CUDA && !USING_XPU
+    RTP_LLM_FAIL("prefillWarmUp is not supported on non-GPU platforms");
     return {};
 #else
     auto fake_input                                   = makeFakeInput((size_t)model_config_.max_seq_len - 1);
@@ -227,16 +233,20 @@ WarmUpResult NormalEngine::prefillWarmUp(const EngineInitParams& params) {
     const auto max_consumed = getGpuExecStatus().device_memory_status.max_consumed_bytes;
     rtp_llm::setTraceMemory(false);
     (void)executor_.reset(nullptr);
+#if USING_XPU
+    c10::xpu::XPUCachingAllocator::emptyCache();
+#else
     cudaDeviceSynchronize();
     c10::cuda::CUDACachingAllocator::emptyCache();
+#endif
     const auto device_status = getGpuExecStatus();
     return WarmUpResult({device_status.device_memory_status.available_bytes, max_consumed});
 #endif
 }
 
 WarmUpResult NormalEngine::decodeWarmUp(const EngineInitParams& params) {
-#if !USING_CUDA
-    RTP_LLM_FAIL("decodeWarmUp is not supported on non-CUDA platforms");
+#if !USING_CUDA && !USING_XPU
+    RTP_LLM_FAIL("decodeWarmUp is not supported on non-GPU platforms");
     return {};
 #else
     auto fake_input                                   = makeFakeInput((size_t)model_config_.max_seq_len - 1);
@@ -259,8 +269,12 @@ WarmUpResult NormalEngine::decodeWarmUp(const EngineInitParams& params) {
     const auto max_consumed = getGpuExecStatus().device_memory_status.max_consumed_bytes;
     rtp_llm::setTraceMemory(false);
     (void)executor_.reset(nullptr);
+#if USING_XPU
+    c10::xpu::XPUCachingAllocator::emptyCache();
+#else
     cudaDeviceSynchronize();
     c10::cuda::CUDACachingAllocator::emptyCache();
+#endif
     const auto device_status = getGpuExecStatus();
     return WarmUpResult({device_status.device_memory_status.available_bytes, max_consumed});
 #endif

@@ -21,6 +21,14 @@ def is_hip():
         return False
 
 
+def is_xpu():
+    device_type = get_exec_ctx().get_device_type()
+    if device_type == DeviceType.Xpu:
+        return True
+    else:
+        return False
+
+
 def get_num_device_sms() -> int:
     if is_cuda():
         assert torch.cuda.is_available()
