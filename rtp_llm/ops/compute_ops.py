@@ -14,4 +14,4 @@ if is_cuda():
         FusedRopeKVCachePrefillOpQOut,
     )
 else:
-    logging.info("Fallback to default implementation of FusedRopeKVCacheOp on non-CUDA device.")
+    logging.info("Fallback to default implementation of FusedRopeKVCacheOp on non-CUDA device (XPU/ROCm/CPU).")

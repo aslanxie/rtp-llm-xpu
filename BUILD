@@ -73,6 +73,11 @@ config_setting(
     values = {"define": "using_cpu=true"},
 )
 
+config_setting(
+    name = "using_xpu",
+    values = {"define": "using_xpu=true"},
+)
+
 selects.config_setting_group(
     name = "using_cuda12_9",
     match_any = [
@@ -120,6 +125,7 @@ cc_binary(
         "@//:using_cuda12": [
             "//rtp_llm/cpp/pybind:th_transformer_gpu",
         ],
+        "@//:using_xpu": [],
         "//conditions:default": [],
     }),
 )
@@ -150,6 +156,7 @@ py_runtime(
     stub_shebang = "#!/opt/conda310/bin/python",
     visibility = ["//visibility:public"],
 )
+
 
 refresh_compile_commands(
     name = "refresh_compdb",

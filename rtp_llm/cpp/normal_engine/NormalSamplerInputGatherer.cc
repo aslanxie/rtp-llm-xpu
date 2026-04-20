@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstring>
 #include "torch/all.h"
+#include "rtp_llm/cpp/core/ExecOps.h"
 #include "rtp_llm/cpp/normal_engine/NormalSamplerInputGatherer.h"
 #include "rtp_llm/cpp/utils/AssertUtils.h"
 #include "rtp_llm/cpp/models/logits_processor/LogitsProcessorStates.h"
@@ -61,7 +62,7 @@ absl::StatusOr<SamplerInputs> NormalSamplerInputGatherer::gather(const StreamGro
     sampler_inputs.vocab_size = vocab_size;
     if (return_all_probs) {
         sampler_inputs.all_probs = torch::zeros({(int64_t)total_batch_size_in, (int64_t)vocab_size},
-                                                torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
+                                                torch::TensorOptions().dtype(torch::kFloat32).device(getTorchDevice()));
     }
 
     // copy logits when needs tiling or returning logits

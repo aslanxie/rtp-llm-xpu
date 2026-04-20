@@ -99,7 +99,7 @@ class AutoModel:
             runtime_config=engine_config.runtime_config,
             model_specific_config=engine_config.model_specific_config,
         )
-        self.device = "cuda"
+        self.device = "xpu" if (hasattr(torch, "xpu") and torch.xpu.is_available()) else "cuda"
 
         # init kv cache and bind it to py model
         self.tokens_per_block = self.model_config.attn_config.tokens_per_block
@@ -215,7 +215,9 @@ class AutoModel:
         # sequence_lengths is index, so minus 1
         attention_inputs.sequence_lengths = torch.tensor(
             [sequence_length - 1], dtype=torch.int32
-        ).pin_memory()
+        )
+        if self.device == "cuda":
+            attention_inputs.sequence_lengths = attention_inputs.sequence_lengths.pin_memory()
         attention_inputs.kv_cache_block_id_device = torch.tensor(
             [[i for i in range(1, need_block_nums + 1)]],
             dtype=torch.int32,

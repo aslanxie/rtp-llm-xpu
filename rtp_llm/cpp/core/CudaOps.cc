@@ -98,17 +98,18 @@ static void batchCopyFallback(const BatchCopyParams& params) {
         for (size_t i = 0; i < copy_batch_size; ++i) {
             size_t        bytes      = buffers.sizes[i];
             torch::Device dst_device = torch::kCPU, src_device = torch::kCPU;
+            auto gpu_device = getTorchDevice();
             switch (copy_type) {
                 case BatchCopyParams::D2D:
-                    dst_device = torch::kCUDA;
-                    src_device = torch::kCUDA;
+                    dst_device = gpu_device;
+                    src_device = gpu_device;
                     break;
                 case BatchCopyParams::D2H:
                     dst_device = torch::kCPU;
-                    src_device = torch::kCUDA;
+                    src_device = gpu_device;
                     break;
                 case BatchCopyParams::H2D:
-                    dst_device = torch::kCUDA;
+                    dst_device = gpu_device;
                     src_device = torch::kCPU;
                     break;
                 case BatchCopyParams::H2H:
@@ -228,7 +229,7 @@ void runtimeMaskLogits(torch::Tensor& logits, const torch::Tensor& mask) {
     }
 }
 
-#else  // ROCm / non-CUDA
+#else  // ROCm / XPU fallback
 
 // ============================================================
 // Copy ops (ROCm)
@@ -244,7 +245,7 @@ void runtimeCopy(const CopyParams& params) {
     // ROCm: dst.copy_(src) dispatches through PyTorch which uses the current HIP stream.
     // params.overlapped is intentionally ignored — ROCm lacks the dedicated overlap stream
     // used by the CUDA path. The default stream provides correct ordering.
-    dst.copy_(src, /*non_blocking=*/src.is_hip() && dst.is_hip());
+    dst.copy_(src, /*non_blocking=*/!src.is_cpu() && !dst.is_cpu());
 }
 
 void multiMergeCopy(const MultiMergeCopyParams& params) {
@@ -265,17 +266,18 @@ static void batchCopyFallback(const BatchCopyParams& params) {
         for (size_t i = 0; i < copy_batch_size; ++i) {
             size_t        bytes      = buffers.sizes[i];
             torch::Device dst_device = torch::kCPU, src_device = torch::kCPU;
+            auto gpu_device = getTorchDevice();
             switch (copy_type) {
                 case BatchCopyParams::D2D:
-                    dst_device = torch::kCUDA;
-                    src_device = torch::kCUDA;
+                    dst_device = gpu_device;
+                    src_device = gpu_device;
                     break;
                 case BatchCopyParams::D2H:
                     dst_device = torch::kCPU;
-                    src_device = torch::kCUDA;
+                    src_device = gpu_device;
                     break;
                 case BatchCopyParams::H2D:
-                    dst_device = torch::kCUDA;
+                    dst_device = gpu_device;
                     src_device = torch::kCPU;
                     break;
                 case BatchCopyParams::H2H:

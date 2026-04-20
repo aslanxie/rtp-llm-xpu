@@ -4,6 +4,7 @@
 #include "torch/all.h"
 #include "rtp_llm/cpp/cache/Types.h"
 #include "rtp_llm/cpp/normal_engine/NormalModelInputGatherer.h"
+#include "rtp_llm/cpp/core/ExecOps.h"
 #include "rtp_llm/cpp/utils/AssertUtils.h"
 #include "rtp_llm/cpp/utils/StatusUtil.h"
 
@@ -131,8 +132,8 @@ void gatherMultimodalFeaturesForContextBatch(const GenerateStreamPtr&    stream,
         ctx.mm_feature_index++;
     }
     for (auto& mm_feature : mm_features) {
-        if (!mm_feature.is_cuda()) {
-            gathered_mm_features.emplace_back(mm_feature.to(torch::kCUDA));
+        if (!mm_feature.is_cuda() && !mm_feature.is_xpu()) {
+            gathered_mm_features.emplace_back(mm_feature.to(getTorchDevice()));
         } else {
             gathered_mm_features.emplace_back(mm_feature);
         }

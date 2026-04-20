@@ -12,6 +12,11 @@ parent_dir = os.path.dirname(current_dir)
 libs_path = os.path.join(parent_dir, "libs")
 SO_NAME = "libth_transformer_config.so"
 
+# XPU C++ engine support: detect Intel GPU
+_xpu_mode = hasattr(torch, 'xpu') and torch.xpu.is_available()
+if _xpu_mode:
+    logging.info("XPU mode: using C++ engine with built .so libraries")
+
 
 # for py test
 def find_upper_so(current_dir: str):
@@ -100,12 +105,6 @@ try:
         logging.info(f"loaded libcaffe2_nvrtc.so from {so_load_path}")
 except BaseException as e:
     logging.info(f"Exception: {e}, traceback: {traceback.format_exc()}")
-
-# frontend cannot load libpython3.10.so, so we need to load it manually
-import sysconfig
-from ctypes import cdll
-
-cdll.LoadLibrary(sysconfig.get_config_var("LIBDIR") + "/libpython3.10.so")
 
 try:
     from libth_transformer_config import (

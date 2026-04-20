@@ -79,7 +79,7 @@ inline c10::ScalarType dataTypeToTorchType(DataType data_type) {
 #undef FOREACH_BUFFER_TORCH_TYPE_MAP
 
 inline MemoryType torchDeviceToMemoryType(const c10::Device& device) {
-    return device.is_cuda() ? MemoryType::MEMORY_GPU : MemoryType::MEMORY_CPU;
+    return (device.is_cuda() || device.is_xpu()) ? MemoryType::MEMORY_GPU : MemoryType::MEMORY_CPU;
 }
 
 inline c10::Device memoryTypeToTorchDevice(const MemoryType& memory_type) {

@@ -129,6 +129,9 @@ class BaseModel(object):
 
     def _get_device_str(self) -> str:
         """Get device string from parallelism_config."""
+        import torch
+        if hasattr(torch, 'xpu') and torch.xpu.is_available():
+            return f"xpu:{self.parallelism_config.local_rank}"
         return f"cuda:{self.parallelism_config.local_rank}"
 
     @timer_wrapper(description="load model")
@@ -150,19 +153,16 @@ class BaseModel(object):
         self.weight_manager = WeightManager(
             self.device, self.weight, self.model_weights_loader
         )
-        if self.load_python_model:
-            logging.info(
-                f"Creating python model for {self.model_config.ckpt_path} on {device_str}"
+        logging.info(
+            f"Creating python model for {self.model_config.ckpt_path} on {device_str}"
+        )
+        remote_jit_dir = os.environ.get("REMOTE_JIT_DIR", None)
+        logging.info(f"python model remote_jit_dir for deep_gemm: {remote_jit_dir}")
+        if remote_jit_dir:
+            os.environ["DG_JIT_REMOTE_CACHE_DIR"] = os.path.join(
+                remote_jit_dir, "deep_gemm_python"
             )
-            remote_jit_dir = os.environ.get("REMOTE_JIT_DIR", None)
-            logging.info(f"python model remote_jit_dir for deep_gemm: {remote_jit_dir}")
-            if remote_jit_dir:
-                os.environ["DG_JIT_REMOTE_CACHE_DIR"] = os.path.join(
-                    remote_jit_dir, "deep_gemm_python"
-                )
-            self._create_python_model()
-        else:
-            logging.info(f"Skip creating python model, use legacy cpp GptModel")
+        self._create_python_model()
 
     def _create_python_model(self):
         raise NotImplementedError("Python Model is not implemented for this model.")

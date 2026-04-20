@@ -52,6 +52,7 @@ cc_library(
         "ComputeInit.cc",
     ] + select({
         "@//:using_cuda12": ["//rtp_llm/cpp/core:exec_ops_srcs"],
+        "@//:using_xpu": [],
         "//conditions:default": [],
     }),
     hdrs = [],
@@ -65,6 +66,7 @@ cc_library(
     ] + torch_deps() + select_py_bindings() + select({
         "@//:using_cuda12": ["//rtp_llm/cpp/cuda/ops:gpu_base"],
         "@//:using_rocm": ["//rtp_llm/cpp/core:exec_ctx_rocm"],
+        "@//:using_xpu": ["//rtp_llm/cpp/core:exec_ctx_state", "//rtp_llm/cpp/core:exec_ctx_ops"],
         "//conditions:default": [],
     }) + no_block_copy_link_deps(),
     copts = copts(),
@@ -97,6 +99,11 @@ cc_library(
         "//:using_cuda": [
             "//rtp_llm/cpp/cuda/ops:gpu_base",
             "//rtp_llm/cpp/cuda_graph:cuda_graph_impl",
+        ],
+        "@//:using_xpu": [
+            "//rtp_llm/cpp/core:exec_ctx_ops",
+            "//rtp_llm/cpp/core:exec_ops_hdr",
+            "//rtp_llm/cpp/core:distributed_comm_hdr",
         ],
         # libth_transformer.so does NOT contain its own copy of
         # globalRuntime() / globalPgState().  Those symbols are
