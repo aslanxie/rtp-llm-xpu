@@ -128,8 +128,12 @@ cc_library(
         "//rtp_llm/cpp/core:cache_store_async_writer",
         "//rtp_llm/cpp/utils:debug_utils",
         "//rtp_llm/cpp/utils:profiling_scope",
-        "//rtp_llm/cpp/cuda_graph:cuda_graph_impl",
-    ],
+        "//rtp_llm/cpp/cuda_graph:cuda_graph_base",
+    ] + select({
+        "//:using_cuda": ["//rtp_llm/cpp/cuda_graph:cuda_graph_impl"],
+        "//:using_rocm": ["//rtp_llm/cpp/cuda_graph:cuda_graph_impl"],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:public"],
 )
 
