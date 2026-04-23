@@ -292,6 +292,53 @@ def _split_qkv_and_rope(qkv, attn_inputs, num_heads, num_kv_heads, head_dim, rop
     return q, k, v
 
 
+# ── Paged KV cache helpers ──────────────────────────────────────────────
+
+def _write_to_paged_cache(k, v, kv_cache, block_ids_cpu, start_pos, num_kv_heads, head_dim):
+    """Write k,v [N, kv_heads, dim] to paged LayerKVCache.
+
+    Uses block_ids to map sequence positions to cache blocks.
+    block_ids_cpu should be a 1-D (or 2-D with 1 row) CPU tensor of block IDs.
+    """
+    tpb = kv_cache.seq_size_per_block
+    cache = kv_cache.kv_cache_base  # [num_blocks, 2, kv_heads, tpb, head_dim]
+    bids = block_ids_cpu.reshape(-1)
+    N = k.shape[0]
+    pos = 0
+    while pos < N:
+        abs_pos = start_pos + pos
+        blk_slot = abs_pos // tpb
+        offset = abs_pos % tpb
+        n = min(tpb - offset, N - pos)
+        if blk_slot >= bids.numel():
+            break
+        bid = int(bids[blk_slot])
+        cache[bid, 0, :, offset:offset+n, :] = k[pos:pos+n].transpose(0, 1)
+        cache[bid, 1, :, offset:offset+n, :] = v[pos:pos+n].transpose(0, 1)
+        pos += n
+
+
+def _read_from_paged_cache(kv_cache, block_ids_cpu, total_len, num_kv_heads, head_dim):
+    """Read K,V [total_len, kv_heads, dim] from paged LayerKVCache.
+
+    block_ids_cpu should be a 1-D (or 2-D with 1 row) CPU tensor of block IDs.
+    """
+    tpb = kv_cache.seq_size_per_block
+    cache = kv_cache.kv_cache_base  # [num_blocks, 2, kv_heads, tpb, head_dim]
+    bids = block_ids_cpu.reshape(-1)
+    k_parts, v_parts = [], []
+    remaining = total_len
+    blk_slot = 0
+    while remaining > 0:
+        bid = int(bids[blk_slot])
+        n = min(tpb, remaining)
+        k_parts.append(cache[bid, 0, :, :n, :].transpose(0, 1).contiguous())
+        v_parts.append(cache[bid, 1, :, :n, :].transpose(0, 1).contiguous())
+        remaining -= n
+        blk_slot += 1
+    return torch.cat(k_parts, dim=0), torch.cat(v_parts, dim=0)
+
+
 # ── Attention implementations ───────────────────────────────────────────────
 
 class XpuVllmPrefillImpl(FMHAImplBase):
@@ -323,26 +370,28 @@ class XpuVllmPrefillImpl(FMHAImplBase):
             self.head_dim, self.rope_config, self.need_rope,
         )
 
-        # Store K,V to per-request caches
-        batch_caches = get_batch_kv_caches()
-        if batch_caches is not None and len(batch_caches) > 1:
-            # Batched prefill: split K,V by request and store separately
-            input_lengths = self.attn_inputs.input_lengths
-            if input_lengths is not None and input_lengths.numel() > 1:
-                offsets = torch.cat([torch.zeros(1, dtype=torch.int32), input_lengths.cpu().cumsum(0)])
-                for req_idx in range(len(batch_caches)):
-                    start = int(offsets[req_idx])
-                    end = int(offsets[req_idx + 1])
-                    batch_caches[req_idx].store(layer_idx, k[start:end], v[start:end])
-            else:
-                # Fallback: single request or unknown split
-                if batch_caches:
-                    batch_caches[0].store(layer_idx, k, v)
-        else:
-            # Single-request path (backward compatible)
-            xpu_cache = get_current_kv_cache()
-            if xpu_cache is not None:
-                xpu_cache.store(layer_idx, k, v)
+        # Write K,V to paged LayerKVCache for future decode steps
+        if kv_cache is not None:
+            block_ids_all = self.attn_inputs.kv_cache_block_id_device
+            if block_ids_all is None:
+                block_ids_all = self.attn_inputs.kv_cache_block_id_host
+            if block_ids_all is not None and block_ids_all.numel() > 0:
+                input_lengths = self.attn_inputs.input_lengths
+                if input_lengths is not None and input_lengths.numel() > 1:
+                    # Batched prefill: write each request separately
+                    offsets = torch.cat([torch.zeros(1, dtype=torch.int32), input_lengths.cpu().cumsum(0)])
+                    for req_idx in range(input_lengths.numel()):
+                        start = int(offsets[req_idx])
+                        end = int(offsets[req_idx + 1])
+                        bids = block_ids_all[req_idx].cpu()
+                        _write_to_paged_cache(
+                            k[start:end], v[start:end], kv_cache, bids, 0,
+                            self.num_kv_heads, self.head_dim,
+                        )
+                else:
+                    bids = block_ids_all[0].cpu()
+                    _write_to_paged_cache(k, v, kv_cache, bids, 0,
+                                          self.num_kv_heads, self.head_dim)
 
         cu_seqlens = self.attn_inputs.cu_seqlens
         if cu_seqlens is None or cu_seqlens.numel() <= 1:
@@ -382,229 +431,124 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         return not attn_inputs.is_prefill
 
     def forward(self, qkv, kv_cache=None, layer_idx=0):
-        batch_caches = get_batch_kv_caches()
-        if batch_caches is not None and len(batch_caches) > 1:
-            # Detect mixed batch: decode_bs from sequence_lengths, rest are prefill
-            seq_lens = self.attn_inputs.sequence_lengths
-            try:
-                decode_bs = seq_lens.numel() if seq_lens is not None else 0
-            except (RuntimeError, AttributeError):
-                decode_bs = 0
-            context_bs = len(batch_caches) - decode_bs
-            if context_bs > 0 and decode_bs > 0:
-                return self._mixed_batch_forward(qkv, batch_caches, decode_bs, context_bs, layer_idx)
-            return self._batched_decode(qkv, batch_caches, layer_idx)
-        else:
-            return self._single_decode(qkv, layer_idx)
-
-    # Cached decode metadata tensors (created once, reused across layers)
-    _cu_q_1: torch.Tensor = None  # [0, 1] for single-token decode
-    _cu_k_buf: torch.Tensor = None  # reusable [0, kv_len] tensor
-
-    def _single_decode(self, qkv, layer_idx):
-        """Single-request decode (backward compatible)."""
+        if kv_cache is not None:
+            return self._paged_decode(qkv, kv_cache, layer_idx)
+        # Fallback: no paged cache, self-attend over current tokens
         flash_attn_varlen = _get_flash_attn_varlen()
-        new_tokens = qkv.shape[0]
-        xpu_cache = get_current_kv_cache()
-
-        # Compute position_ids for decode (only layer 0)
-        if self.attn_inputs.position_ids is None and self.need_rope:
-            cached_len = xpu_cache.get_seq_len(layer_idx) if xpu_cache is not None else 0
-            self.attn_inputs.position_ids = torch.arange(
-                cached_len, cached_len + new_tokens,
-                dtype=torch.long, device=qkv.device,
-            )
-
-        q_new, k_new, v_new = _split_qkv_and_rope(
+        q, k, v = _split_qkv_and_rope(
             qkv, self.attn_inputs, self.num_heads, self.num_kv_heads,
             self.head_dim, self.rope_config, self.need_rope,
         )
+        N = qkv.shape[0]
+        cu = torch.tensor([0, N], dtype=torch.int32, device=qkv.device)
+        output = flash_attn_varlen(q, k, v, cu_seqlens_q=cu, cu_seqlens_k=cu,
+                                    max_seqlen_q=N, max_seqlen_k=N, causal=True)
+        return output.reshape(N, -1)
 
-        if xpu_cache is not None:
-            xpu_cache.store(layer_idx, k_new, v_new)
-            k_full, v_full = xpu_cache.get(layer_idx)
-        else:
-            k_full, v_full = k_new, v_new
+    def _paged_decode(self, qkv, kv_cache, layer_idx):
+        """Decode using paged LayerKVCache with block_table support.
 
-        kv_len = k_full.shape[0]
-
-        # Cache cu_seqlens_q for single-token decode (always [0, 1])
-        if new_tokens == 1:
-            if XpuVllmDecodeImpl._cu_q_1 is None or XpuVllmDecodeImpl._cu_q_1.device != qkv.device:
-                XpuVllmDecodeImpl._cu_q_1 = torch.tensor([0, 1], dtype=torch.int32, device=qkv.device)
-            cu_q = XpuVllmDecodeImpl._cu_q_1
-        else:
-            cu_q = torch.tensor([0, new_tokens], dtype=torch.int32, device=qkv.device)
-        cu_k = torch.tensor([0, kv_len], dtype=torch.int32, device=qkv.device)
-
-        output = flash_attn_varlen(
-            q_new, k_full, v_full,
-            cu_seqlens_q=cu_q, cu_seqlens_k=cu_k,
-            max_seqlen_q=new_tokens, max_seqlen_k=kv_len,
-            causal=False,
-        )
-        return output.reshape(new_tokens, -1)
-
-    def _batched_decode(self, qkv, batch_caches, layer_idx):
-        """Batched decode with per-request KV caches using flash_attn_varlen."""
+        Uses flash_attn_varlen block_table parameter so the kernel reads
+        K,V directly from the paged cache — no manual gather needed.
+        """
         flash_attn_varlen = _get_flash_attn_varlen()
+        seq_lengths = self.attn_inputs.sequence_lengths
+        block_ids_all = self.attn_inputs.kv_cache_block_id_device
+        if block_ids_all is None:
+            block_ids_all = self.attn_inputs.kv_cache_block_id_host
 
-        num_requests = len(batch_caches)
+        try:
+            num_requests = seq_lengths.numel() if seq_lengths is not None else 0
+        except (RuntimeError, AttributeError):
+            num_requests = 0
+        if num_requests == 0:
+            num_requests = 1
 
-        # Build position_ids for all requests based on their KV cache lengths
+        # Set position_ids for RoPE based on sequence lengths
         if self.need_rope:
             positions = []
-            for i, cache in enumerate(batch_caches):
-                cached_len = cache.get_seq_len(layer_idx)
-                positions.append(cached_len)
-            position_ids = torch.tensor(positions, dtype=torch.long, device=qkv.device)
-            # Override position_ids for RoPE
-            self.attn_inputs.position_ids = position_ids
+            for i in range(num_requests):
+                pos = int(seq_lengths[i].item()) if seq_lengths is not None else 0
+                positions.append(pos)
+            self.attn_inputs.position_ids = torch.tensor(
+                positions, dtype=torch.long, device=qkv.device,
+            )
 
         q_new, k_new, v_new = _split_qkv_and_rope(
             qkv, self.attn_inputs, self.num_heads, self.num_kv_heads,
             self.head_dim, self.rope_config, self.need_rope,
         )
 
-        # Store each request's new K,V to its own cache, then gather full KV
-        k_parts = []
-        v_parts = []
+        # Reshape block_ids to [num_requests, max_blocks]
+        bids_2d_for_write = block_ids_all.reshape(num_requests, -1)
+
+        # Write new K,V token to paged cache for each request
         kv_lens = []
+        for i in range(num_requests):
+            start_pos = int(seq_lengths[i].item()) if seq_lengths is not None else 0
+            bids = bids_2d_for_write[i]
+            _write_to_paged_cache(
+                k_new[i:i+1], v_new[i:i+1], kv_cache, bids.cpu(), start_pos,
+                self.num_kv_heads, self.head_dim,
+            )
+            kv_lens.append(start_pos + 1)
 
-        for i, cache in enumerate(batch_caches):
-            # Store this request's new K,V (single token)
-            cache.store(layer_idx, k_new[i:i+1], v_new[i:i+1])
-            k_full_i, v_full_i = cache.get(layer_idx)
-            k_parts.append(k_full_i)
-            v_parts.append(v_full_i)
-            kv_lens.append(k_full_i.shape[0])
+        # Gather only needed blocks, transpose to flash_attn paged format
+        # Cache: [num_blocks, 2, kv_heads, tpb, head_dim]
+        # flash_attn expects: [gathered_blocks, page_size, nheads_k, head_dim]
+        cache = kv_cache.kv_cache_base
+        tpb = kv_cache.seq_size_per_block
 
-        # Concatenate all KV for flash_attn_varlen
-        k_all = torch.cat(k_parts, dim=0)  # [sum_kv_lens, kv_heads, head_dim]
-        v_all = torch.cat(v_parts, dim=0)
 
-        # Build cu_seqlens
-        # Q: each request has exactly 1 query token
-        cu_q = torch.arange(0, num_requests + 1, dtype=torch.int32, device=qkv.device)
-        # K: variable lengths per request
-        cu_k_list = [0]
-        for l in kv_lens:
-            cu_k_list.append(cu_k_list[-1] + l)
-        cu_k = torch.tensor(cu_k_list, dtype=torch.int32, device=qkv.device)
+        # block_ids_all shape can be [batch, 1, max_blocks] or [batch, max_blocks] or [max_blocks]
+        # Reshape to [num_requests, max_blocks]
+        bids_2d = block_ids_all.reshape(num_requests, -1).cpu()
+        max_blocks_needed = max((l + tpb - 1) // tpb for l in kv_lens)
+
+        # Collect unique block IDs needed
+        needed_bids = []
+        for i in range(num_requests):
+            n_blocks = (kv_lens[i] + tpb - 1) // tpb
+            for j in range(n_blocks):
+                needed_bids.append(int(bids_2d[i, j].item()))
+
+        unique_bids = list(dict.fromkeys(needed_bids))
+        bid_to_idx = {bid: idx for idx, bid in enumerate(unique_bids)}
+        bid_tensor = torch.tensor(unique_bids, dtype=torch.long, device=cache.device)
+
+        # Gather only needed blocks: [n_unique, 2, kv_heads, tpb, head_dim]
+        gathered = cache[bid_tensor]
+        # Transpose to flash_attn paged format: [n_unique, tpb, kv_heads, head_dim]
+        k_cache = gathered[:, 0].transpose(1, 2).contiguous()
+        v_cache = gathered[:, 1].transpose(1, 2).contiguous()
+
+        # Build remapped block_table: [num_requests, max_blocks_needed]
+        new_table = []
+        for i in range(num_requests):
+            n_blocks = (kv_lens[i] + tpb - 1) // tpb
+            remapped = []
+            for j in range(max_blocks_needed):
+                if j < n_blocks:
+                    remapped.append(bid_to_idx[int(bids_2d[i, j].item())])
+                else:
+                    remapped.append(0)
+            new_table.append(remapped)
+        block_table = torch.tensor(new_table, dtype=torch.int32, device=qkv.device)
 
         max_kv_len = max(kv_lens)
-
-        if layer_idx == 0:
-            logger.debug(f'[XPU-BatchDecode] n={num_requests} kv_lens={kv_lens}')
+        seqused_k = torch.tensor(kv_lens, dtype=torch.int32, device=qkv.device)
+        cu_q = torch.arange(0, num_requests + 1, dtype=torch.int32, device=qkv.device)
 
         output = flash_attn_varlen(
-            q_new.contiguous(), k_all.contiguous(), v_all.contiguous(),
-            cu_seqlens_q=cu_q, cu_seqlens_k=cu_k,
-            max_seqlen_q=1, max_seqlen_k=max_kv_len,
+            q_new.contiguous(),
+            k_cache,
+            v_cache,
+            cu_seqlens_q=cu_q,
+            cu_seqlens_k=None,
+            max_seqlen_q=1,
+            max_seqlen_k=max_kv_len,
             causal=False,
+            block_table=block_table,
+            seqused_k=seqused_k,
         )
         return output.reshape(num_requests, -1)
-
-    def _mixed_batch_forward(self, qkv, batch_caches, decode_bs, context_bs, layer_idx):
-        """Handle mixed prefill+decode batch by splitting and processing separately."""
-        flash_attn_varlen = _get_flash_attn_varlen()
-
-        input_lengths = self.attn_inputs.input_lengths
-        decode_token_count = decode_bs
-
-        decode_qkv = qkv[:decode_token_count]
-        prefill_qkv = qkv[decode_token_count:]
-
-        decode_caches = batch_caches[:decode_bs]
-        prefill_caches = batch_caches[decode_bs:]
-
-        if layer_idx == 0:
-            logger.debug(
-                f'[XPU-MixedBatch] decode_bs={decode_bs} context_bs={context_bs} '
-                f'decode_tokens={decode_token_count} prefill_tokens={prefill_qkv.shape[0]}'
-            )
-
-        # --- Process decode requests ---
-        if self.need_rope:
-            decode_positions = []
-            for cache in decode_caches:
-                decode_positions.append(cache.get_seq_len(layer_idx))
-            saved_pos = self.attn_inputs.position_ids
-            self.attn_inputs.position_ids = torch.tensor(
-                decode_positions, dtype=torch.long, device=qkv.device
-            )
-
-        q_dec, k_dec, v_dec = _split_qkv_and_rope(
-            decode_qkv, self.attn_inputs, self.num_heads, self.num_kv_heads,
-            self.head_dim, self.rope_config, self.need_rope,
-        )
-
-        # Store decode K,V and gather full KV
-        k_parts, v_parts, kv_lens = [], [], []
-        for i, cache in enumerate(decode_caches):
-            cache.store(layer_idx, k_dec[i:i+1], v_dec[i:i+1])
-            k_full_i, v_full_i = cache.get(layer_idx)
-            k_parts.append(k_full_i)
-            v_parts.append(v_full_i)
-            kv_lens.append(k_full_i.shape[0])
-
-        k_all_dec = torch.cat(k_parts, dim=0)
-        v_all_dec = torch.cat(v_parts, dim=0)
-        cu_q_dec = torch.arange(0, decode_bs + 1, dtype=torch.int32, device=qkv.device)
-        cu_k_list = [0]
-        for l in kv_lens:
-            cu_k_list.append(cu_k_list[-1] + l)
-        cu_k_dec = torch.tensor(cu_k_list, dtype=torch.int32, device=qkv.device)
-
-        decode_output = flash_attn_varlen(
-            q_dec.contiguous(), k_all_dec.contiguous(), v_all_dec.contiguous(),
-            cu_seqlens_q=cu_q_dec, cu_seqlens_k=cu_k_dec,
-            max_seqlen_q=1, max_seqlen_k=max(kv_lens),
-            causal=False,
-        )
-        decode_output = decode_output.reshape(decode_bs, -1)
-
-        # --- Process prefill requests ---
-        prefill_input_lengths = input_lengths[decode_bs:]
-        if self.need_rope:
-            prefill_positions = []
-            for i in range(context_bs):
-                inp_len = int(prefill_input_lengths[i].item())
-                prefill_positions.extend(range(inp_len))
-            self.attn_inputs.position_ids = torch.tensor(
-                prefill_positions, dtype=torch.long, device=qkv.device
-            )
-
-        q_pre, k_pre, v_pre = _split_qkv_and_rope(
-            prefill_qkv, self.attn_inputs, self.num_heads, self.num_kv_heads,
-            self.head_dim, self.rope_config, self.need_rope,
-        )
-
-        # Store prefill K,V to caches
-        offsets = torch.cat([
-            torch.zeros(1, dtype=torch.int32),
-            prefill_input_lengths.cpu().cumsum(0)
-        ])
-        for i, cache in enumerate(prefill_caches):
-            start = int(offsets[i])
-            end = int(offsets[i + 1])
-            cache.store(layer_idx, k_pre[start:end], v_pre[start:end])
-
-        # Build cu_seqlens for prefill (self-attention, causal)
-        cu_pre = torch.zeros(context_bs + 1, dtype=torch.int32, device=qkv.device)
-        cu_pre[1:] = prefill_input_lengths.to(device=qkv.device, dtype=torch.int32).cumsum(0)
-        max_prefill_len = int(prefill_input_lengths.max().item())
-
-        prefill_output = flash_attn_varlen(
-            q_pre.contiguous(), k_pre.contiguous(), v_pre.contiguous(),
-            cu_seqlens_q=cu_pre, cu_seqlens_k=cu_pre,
-            max_seqlen_q=max_prefill_len, max_seqlen_k=max_prefill_len,
-            causal=True,
-        )
-        prefill_output = prefill_output.reshape(prefill_qkv.shape[0], -1)
-
-        # Restore position_ids
-        if self.need_rope:
-            self.attn_inputs.position_ids = saved_pos if saved_pos is not None else torch.tensor([], dtype=torch.long)
-
-        return torch.cat([decode_output, prefill_output], dim=0)

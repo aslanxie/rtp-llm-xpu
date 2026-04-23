@@ -20,5 +20,5 @@ class FusedSiluAndMul(SiluAndMulBase):
             torch.ops._C.silu_and_mul(output, gate_up)
         else:
             x, gate = gate_up[..., :d], gate_up[..., d:]
-            output.copy_(torch.nn.functional.silu(gate) * x)
+            output.copy_(torch.nn.functional.silu(x) * gate)
         return output

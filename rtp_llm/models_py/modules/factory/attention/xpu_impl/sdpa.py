@@ -66,11 +66,28 @@ class XpuSdpaPrefillImpl(FMHAImplBase):
 
         v = qkv[:, q_size + kv_size:].view(total_tokens, self.num_kv_heads, self.head_dim)
 
+        # Write K,V to paged cache for future decode steps
         if kv_cache is not None:
-            try:
-                kv_cache.store(k, v)
-            except Exception:
-                pass
+            block_ids_all = self.attn_inputs.kv_cache_block_id_device
+            if block_ids_all is None:
+                block_ids_all = self.attn_inputs.kv_cache_block_id_host
+            if block_ids_all is not None and block_ids_all.numel() > 0:
+                from rtp_llm.models_py.modules.factory.attention.xpu_impl.vllm_flash_attn import _write_to_paged_cache
+                input_lengths = self.attn_inputs.input_lengths
+                if input_lengths is not None and input_lengths.numel() > 1:
+                    offsets = torch.cat([torch.zeros(1, dtype=torch.int32), input_lengths.cpu().cumsum(0)])
+                    for req_idx in range(input_lengths.numel()):
+                        start = int(offsets[req_idx])
+                        end = int(offsets[req_idx + 1])
+                        bids = block_ids_all[req_idx].cpu()
+                        _write_to_paged_cache(
+                            k[start:end], v[start:end], kv_cache, bids, 0,
+                            self.num_kv_heads, self.head_dim,
+                        )
+                else:
+                    bids = block_ids_all[0].cpu()
+                    _write_to_paged_cache(k, v, kv_cache, bids, 0,
+                                          self.num_kv_heads, self.head_dim)
 
         if self.num_kv_heads < self.num_heads:
             repeat_factor = self.num_heads // self.num_kv_heads
@@ -103,7 +120,10 @@ class XpuSdpaPrefillImpl(FMHAImplBase):
 
 
 class XpuSdpaDecodeImpl(FMHAImplBase):
-    """Decode attention using PyTorch SDPA on Intel XPU with RoPE."""
+    """Decode attention using PyTorch SDPA on Intel XPU with RoPE.
+
+    Uses paged LayerKVCache for KV history across decode steps.
+    """
 
     def __init__(self, attn_configs, attn_inputs, parallelism_config=None):
         self.fmha_params = None
@@ -120,35 +140,47 @@ class XpuSdpaDecodeImpl(FMHAImplBase):
         return not attn_inputs.is_prefill
 
     def forward(self, qkv, kv_cache=None, layer_idx=0):
+        from rtp_llm.models_py.modules.factory.attention.xpu_impl.vllm_flash_attn import (
+            _split_qkv_and_rope, _write_to_paged_cache, _read_from_paged_cache,
+        )
+
         total_tokens = qkv.shape[0]
-        q_size = self.num_heads * self.head_dim
-        kv_size = self.num_kv_heads * self.head_dim
 
+        # Compute position_ids from sequence_lengths
         if self.need_rope:
-            positions = self.attn_inputs.position_ids
-            if positions is None:
-                positions = torch.arange(total_tokens, dtype=torch.long, device=qkv.device)
-            q_flat = qkv[:, :q_size].contiguous()
-            k_flat = qkv[:, q_size:q_size + kv_size].contiguous()
-            q_flat, k_flat = _apply_rope(
-                q_flat, k_flat, positions,
-                self.rope_config, self.head_dim,
-                self.num_heads, self.num_kv_heads,
-                qkv.device, qkv.dtype,
+            seq_lengths = self.attn_inputs.sequence_lengths
+            if seq_lengths is not None and seq_lengths.numel() > 0:
+                start_pos = int(seq_lengths[0].item())
+            else:
+                start_pos = 0
+            self.attn_inputs.position_ids = torch.arange(
+                start_pos, start_pos + total_tokens,
+                dtype=torch.long, device=qkv.device,
             )
-            q = q_flat.view(total_tokens, self.num_heads, self.head_dim)
-            k = k_flat.view(total_tokens, self.num_kv_heads, self.head_dim)
-        else:
-            q = qkv[:, :q_size].view(total_tokens, self.num_heads, self.head_dim)
-            k = qkv[:, q_size:q_size + kv_size].view(total_tokens, self.num_kv_heads, self.head_dim)
 
-        v = qkv[:, q_size + kv_size:].view(total_tokens, self.num_kv_heads, self.head_dim)
+        q, k_new, v_new = _split_qkv_and_rope(
+            qkv, self.attn_inputs, self.num_heads, self.num_kv_heads,
+            self.head_dim, self.rope_config, self.need_rope,
+        )
 
+        # Use paged KV cache
         if kv_cache is not None:
-            try:
-                kv_cache.store(k, v)
-            except Exception:
-                pass
+            block_ids_all = self.attn_inputs.kv_cache_block_id_device
+            if block_ids_all is None:
+                block_ids_all = self.attn_inputs.kv_cache_block_id_host
+            if block_ids_all is not None and block_ids_all.numel() > 0:
+                seq_lengths = self.attn_inputs.sequence_lengths
+                start_pos = int(seq_lengths[0].item()) if seq_lengths is not None and seq_lengths.numel() > 0 else 0
+                bids = block_ids_all[0].cpu()
+                _write_to_paged_cache(k_new, v_new, kv_cache, bids, start_pos,
+                                      self.num_kv_heads, self.head_dim)
+                total_len = start_pos + total_tokens
+                k, v = _read_from_paged_cache(kv_cache, bids, total_len,
+                                              self.num_kv_heads, self.head_dim)
+            else:
+                k, v = k_new, v_new
+        else:
+            k, v = k_new, v_new
 
         if self.num_kv_heads < self.num_heads:
             repeat_factor = self.num_heads // self.num_kv_heads
@@ -159,7 +191,7 @@ class XpuSdpaDecodeImpl(FMHAImplBase):
         k = k.transpose(0, 1).unsqueeze(0)
         v = v.transpose(0, 1).unsqueeze(0)
 
-        output = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        output = F.scaled_dot_product_attention(q, k, v, is_causal=False)
         output = output.squeeze(0).transpose(0, 1)
 
         return output.reshape(total_tokens, -1)

@@ -80,7 +80,7 @@ def silu_and_mul(out, input):
     else:
         d = input.shape[-1] // 2
         x, gate = input[..., :d], input[..., d:]
-        out.copy_(torch.nn.functional.silu(gate) * x)
+        out.copy_(torch.nn.functional.silu(x) * gate)
 
 
 def gelu_and_mul(out, input):
@@ -89,7 +89,7 @@ def gelu_and_mul(out, input):
     else:
         d = input.shape[-1] // 2
         x, gate = input[..., :d], input[..., d:]
-        out.copy_(torch.nn.functional.gelu(gate) * x)
+        out.copy_(torch.nn.functional.gelu(x) * gate)
 
 
 def rotary_embedding(positions, query, key, head_size, cos_sin_cache, is_neox=True):
@@ -105,6 +105,18 @@ def flash_attn_varlen(q, k, v, cu_seqlens_q, cu_seqlens_k,
                       block_table=None, seqused_k=None):
     if _FA2_AVAILABLE:
         from vllm_xpu_kernels.flash_attn_interface import flash_attn_varlen_func
+        # block_table requires seqused_k and forbids cu_seqlens_k
+        if block_table is not None:
+            return flash_attn_varlen_func(
+                q, k, v,
+                max_seqlen_q=max_seqlen_q,
+                cu_seqlens_q=cu_seqlens_q,
+                max_seqlen_k=max_seqlen_k,
+                seqused_k=seqused_k,
+                softmax_scale=softmax_scale,
+                causal=causal,
+                block_table=block_table,
+            )
         return flash_attn_varlen_func(
             q, k, v,
             max_seqlen_q=max_seqlen_q,
