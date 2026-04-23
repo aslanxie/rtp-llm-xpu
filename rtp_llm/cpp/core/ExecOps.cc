@@ -63,6 +63,7 @@ void             multiMergeCopy(const MultiMergeCopyParams& params);
 #include "rtp_llm/cpp/rocm/hip_host_utils.h"
 #elif USING_XPU
 // XPU: no special runtime headers; uses PyTorch XPU backend.
+#include "rtp_llm/cpp/core/torch_utils/TorchEvent.h"
 #endif
 
 using namespace std;
