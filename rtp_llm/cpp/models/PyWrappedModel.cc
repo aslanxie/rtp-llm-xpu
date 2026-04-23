@@ -93,31 +93,19 @@ torch_ext::PyAttentionInputs PyWrappedModel::buildPyAttentionInputs(const GptMod
         batch_size);
 
     if (context_batch_size > 0) {
-        // Extract context-only input lengths (decode requests occupy indices [0, decode_bs),
-        // context/prefill requests occupy indices [decode_bs, batch_size)).
-        auto context_input_lengths = py_attn_inputs.input_lengths.slice(0, decode_batch_size, batch_size);
-
         torch::Tensor cu_seqlens =
-            torch::zeros({(int64_t)context_batch_size + 1}, torch::TensorOptions(torch::kInt32).device(torch::kCPU));
+            torch::zeros({batch_size + 1}, torch::TensorOptions(torch::kInt32).device(torch::kCPU));
         torch::Tensor cu_kv_seqlens =
-            torch::zeros({(int64_t)context_batch_size + 1}, torch::TensorOptions(torch::kInt32).device(torch::kCPU));
+            torch::zeros({batch_size + 1}, torch::TensorOptions(torch::kInt32).device(torch::kCPU));
 
-        cu_seqlens.slice(0, 1, context_batch_size + 1) = context_input_lengths.cumsum(0);
+        cu_seqlens.slice(0, 1, context_batch_size + 1) = py_attn_inputs.input_lengths.cumsum(0);
         cu_kv_seqlens.slice(0, 1, context_batch_size + 1) =
-            context_input_lengths.add(py_attn_inputs.prefix_lengths).cumsum(0);
+            py_attn_inputs.input_lengths.add(py_attn_inputs.prefix_lengths).cumsum(0);
 
         py_attn_inputs.context_total_kv_length = cu_kv_seqlens[context_batch_size].item<int>();
-        py_attn_inputs.total_tokens            = py_attn_inputs.input_lengths.sum().item<int>();
+        py_attn_inputs.total_tokens            = cu_seqlens[batch_size].item<int>();
         py_attn_inputs.cu_seqlens              = tensorHoldHostAndToCuda(cu_seqlens);
         py_attn_inputs.cu_kv_seqlens           = tensorHoldHostAndToCuda(cu_kv_seqlens);
-
-        // Also prepare decode cu_seqlens when decode requests are present in the mixed batch
-        if (decode_batch_size > 0) {
-            torch::Tensor decode_cu_seqlens = torch::arange(
-                0, (int64_t)decode_batch_size + 1, 1, torch::TensorOptions(torch::kInt32).device(torch::kCPU));
-            py_attn_inputs.decode_cu_seqlens_host = decode_cu_seqlens;
-            py_attn_inputs.decode_cu_seqlens_d    = tensorHoldHostAndToCuda(decode_cu_seqlens);
-        }
     } else {
         py_attn_inputs.total_tokens = 0;
         py_attn_inputs.cu_seqlens =
