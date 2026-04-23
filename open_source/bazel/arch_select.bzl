@@ -38,9 +38,19 @@ _XPU_EXCLUDED_PACKAGES = [
     "pyarrow", "pyodps", "matplotlib",
 ]
 
+# Packages with different names in the XPU pip environment.
+_XPU_PACKAGE_REMAP = {
+    "triton": "triton-xpu",
+}
+
 def requirement(names):
     for name in names:
-        xpu_dep = [] if name in _XPU_EXCLUDED_PACKAGES else [requirement_xpu(name)]
+        if name in _XPU_EXCLUDED_PACKAGES:
+            xpu_dep = []
+        elif name in _XPU_PACKAGE_REMAP:
+            xpu_dep = [requirement_xpu(_XPU_PACKAGE_REMAP[name])]
+        else:
+            xpu_dep = [requirement_xpu(name)]
         native.py_library(
             name = name,
             deps = select({

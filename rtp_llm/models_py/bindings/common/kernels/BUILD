@@ -223,9 +223,11 @@ cc_library(
 
 cc_library(
     name = "fuse_copy_kernel",
-    srcs = [
-        "fuse_copy_kernel.cu",
-    ],
+    srcs = select({
+        "//:using_cuda": ["fuse_copy_kernel.cu"],
+        "//:using_rocm": ["fuse_copy_kernel.cu"],
+        "//conditions:default": [],
+    }),
     hdrs = [
         "fuse_copy_kernel.h",
     ],
