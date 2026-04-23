@@ -139,12 +139,7 @@ AsyncEventPtr runtimeCreateEvent() {
 #elif USING_XPU
 
 AsyncEventPtr runtimeCreateEvent() {
-    // XPU: use a simple synchronous event stub.
-    struct XpuEvent: public AsyncEvent {
-        void synchronize() const override {}
-        bool checkReadiness() const override { return true; }
-    };
-    return std::make_unique<XpuEvent>();
+    return std::make_unique<TorchEvent>(c10::xpu::getCurrentXPUStream());
 }
 
 #else  // ROCm

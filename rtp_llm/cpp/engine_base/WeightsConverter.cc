@@ -12,11 +12,7 @@ WeightsConverter::WeightsConverter(bool need_copy, rtp_llm::QuantAlgo quant_alog
 
 torch::Tensor WeightsConverter::CopyTensorToGPU(const torch::Tensor& tensor) {
     if (need_copy_) {
-#if USING_XPU
-        auto gpu_tensor = torch::empty_like(tensor, torch::TensorOptions().device(torch::kXPU));
-#else
         auto gpu_tensor = torch::empty_like(tensor, torch::TensorOptions().device(getTorchDevice()));
-#endif
         gpu_tensor.copy_(tensor, /*non_blocking=*/true);
         return gpu_tensor;
     } else {

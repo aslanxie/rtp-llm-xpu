@@ -235,6 +235,7 @@ WarmUpResult NormalEngine::prefillWarmUp(const EngineInitParams& params) {
     rtp_llm::setTraceMemory(false);
     (void)executor_.reset(nullptr);
 #if USING_XPU
+    c10::xpu::getCurrentXPUStream().synchronize();
     c10::xpu::XPUCachingAllocator::emptyCache();
 #else
     cudaDeviceSynchronize();
@@ -271,6 +272,7 @@ WarmUpResult NormalEngine::decodeWarmUp(const EngineInitParams& params) {
     rtp_llm::setTraceMemory(false);
     (void)executor_.reset(nullptr);
 #if USING_XPU
+    c10::xpu::getCurrentXPUStream().synchronize();
     c10::xpu::XPUCachingAllocator::emptyCache();
 #else
     cudaDeviceSynchronize();
