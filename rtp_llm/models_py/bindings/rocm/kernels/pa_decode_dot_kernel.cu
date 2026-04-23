@@ -5,6 +5,7 @@
         #include <inttypes.h>
         #include <string.h>
         #include <hip/hip_runtime.h>
+        #include "hip_warp_compat.h"
 
         // helpers to check for hip errors
         #define HIP_CHECK(ans) {{            gpuAssert((ans), __FILE__, __LINE__);        }}
@@ -45,7 +46,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_2_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_2_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -73,7 +74,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_2_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_2_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -101,7 +102,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_3_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_3_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -129,7 +130,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_3_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_3_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -157,7 +158,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_4_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_4_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -185,7 +186,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_4_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_4_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -213,7 +214,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_5_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_5_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -241,7 +242,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_5_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_5_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -269,7 +270,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_6_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_6_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -297,7 +298,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_6_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_6_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -325,7 +326,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_7_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_7_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -353,7 +354,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_7_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_7_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -381,7 +382,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_8_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_8_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -409,7 +410,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_8_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_8_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -437,7 +438,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_9_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_9_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -465,7 +466,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_9_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_9_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -493,7 +494,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_10_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_10_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -521,7 +522,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_10_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_10_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -549,7 +550,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_11_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_11_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -577,7 +578,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_11_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_11_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -605,7 +606,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_12_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_12_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -633,7 +634,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_12_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_12_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -661,7 +662,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_16_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_16_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -689,7 +690,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_16_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel64_16_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -717,7 +718,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_2_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_2_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -745,7 +746,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_2_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_2_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -773,7 +774,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_3_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_3_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -801,7 +802,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_3_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_3_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -829,7 +830,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_4_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_4_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -857,7 +858,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_4_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_4_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -885,7 +886,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_5_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_5_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -913,7 +914,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_5_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_5_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -941,7 +942,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_6_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_6_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -969,7 +970,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_6_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_6_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -997,7 +998,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_7_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_7_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -1025,7 +1026,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_7_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_7_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -1053,7 +1054,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_8_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_8_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -1081,7 +1082,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_8_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_8_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -1109,7 +1110,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_9_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_9_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -1137,7 +1138,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_9_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_9_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -1165,7 +1166,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_10_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_10_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -1193,7 +1194,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_10_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_10_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -1221,7 +1222,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_11_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_11_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -1249,7 +1250,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_11_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_11_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -1277,7 +1278,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_12_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_12_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -1305,7 +1306,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_12_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_12_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -1333,7 +1334,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_16_256_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_16_256_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }
@@ -1361,7 +1362,7 @@
             void *args[29] = { &exp_sums_ptr, &max_logits_ptr, &logits_ptr, &q_ptr, &k_cache_ptr, &v_cache_ptr, &blk_tables_ptrs, &seq_lens_ptr, &scale, &alibi_slopes, &stride_max_logits_s, &stride_max_logits_nh, &stride_max_logits_p, &stride_logits_s, &stride_logits_nh, &stride_logits_p, &stride_logits_g, &stride_q_s, &stride_q_nh, &stride_k_b, &stride_k_nh, &stride_k_hz, &stride_k_bz, &stride_v_b, &stride_v_nh, &stride_v_hz, &stride_bt_s, &global_scratch, &profile_scratch };
             // TODO: shared memory
             if(gX * gY * gZ > 0)
-            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_16_512_func, gX, gY, gZ, 4 * warpSize, 1, 1, 4096, stream, args, nullptr);
+            return hipModuleLaunchKernel(_pa_decode_dot_kernel128_16_512_func, gX, gY, gZ, 256 /* 4 * warpSize (AMD warp=64) */, 1, 1, 4096, stream, args, nullptr);
             else
             return hipErrorInvalidValue;
         }

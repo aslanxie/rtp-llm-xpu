@@ -16,7 +16,6 @@
 #if USING_CUDA || USING_ROCM
 #include "rtp_llm/cpp/cuda_graph/cuda_graph_runner.h"
 #endif
-
 #include "rtp_llm/cpp/models/context_parallel/ContextParallelProcessorBase.h"
 #include "rtp_llm/cpp/core/DeviceData.h"
 #include "rtp_llm/cpp/core/ExecOps.h"
@@ -94,6 +93,13 @@ private:
 
     std::unique_ptr<IContextParallelProcessor> context_parallel_processor_{nullptr};
     std::unique_ptr<CacheStoreAsyncWriter>     cache_store_async_writer_;
+
+    // Accumulated H2D copies from tensorHoldHostAndToCuda(); flushed as one kernel per forward.
+    FusedD2DCopyParams d2d_copies_;
+
+    // is_pinned() is expensive on CPU; only assert during first N forwards as a sanity check.
+    static constexpr int kPinnedCheckForwardCount = 3;
+    int                  pinned_check_remaining_{kPinnedCheckForwardCount};
 };
 
 // NOTE(wangyin): constructor can not be compiled correctly when placed in cc file.
@@ -185,11 +191,10 @@ inline PyWrappedModel::PyWrappedModel(const GptModelInitParams& params,
         graph_params.kernel_tokens_per_block      = device_params.kernel_tokens_per_block;
         graph_params.hidden_size                  = device_params.hidden_size;
         graph_params.model_data_type              = dtype;
-        graph_params.max_context_batch_size = device_params.runtime_config.fifo_scheduler_config.max_context_batch_size;
-        graph_params.concurrency_limit      = device_params.concurrency_config.concurrency_limit;
-        graph_params.prefill_capture_seq_lens   = device_params.hw_kernel_config.prefill_capture_seq_lens;
-        graph_params.decode_capture_batch_sizes = device_params.hw_kernel_config.decode_capture_batch_sizes;
-        graph_params.kv_cache_group_num         = device_params.kv_cache_group_num;
+        graph_params.max_context_batch_size       = device_params.concurrency_config.concurrency_limit;
+        graph_params.prefill_capture_seq_lens     = device_params.hw_kernel_config.prefill_capture_seq_lens;
+        graph_params.decode_capture_batch_sizes   = device_params.hw_kernel_config.decode_capture_batch_sizes;
+        graph_params.kv_cache_group_num           = device_params.kv_cache_group_num;
 
         if (kv_cache_layer_to_group.size() > 0) {
             graph_params.kv_cache_layer_to_group = kv_cache_layer_to_group;
