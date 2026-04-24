@@ -122,7 +122,7 @@ inline PyWrappedModel::PyWrappedModel(const GptModelInitParams& params,
     model_id_              = params.model_id;
     kv_cache_layer_layout_ = params.kv_cache_layer_layout;
     if (abs(description_.residual_scalar - 1.0) > 1e-6) {
-        auto residual_tensor = torch::tensor({(float)description_.residual_scalar}, torch::kFloat32).cuda();
+        auto residual_tensor = torch::tensor({(float)description_.residual_scalar}, torch::kFloat32).to(getTorchDevice());
 #if USING_CUDA
         c10::cuda::getCurrentCUDAStream().synchronize();
 #endif
@@ -235,8 +235,13 @@ inline PyWrappedModel::PyWrappedModel(const GptModelInitParams& params,
                                                          static_cast<int>(params.parallelism_config.tp_size),
                                                          static_cast<int>(params.parallelism_config.tp_rank));
         }
+#elif USING_XPU
+        // XPU: use torch synchronize through device guard
+        c10::impl::VirtualGuardImpl impl(c10::DeviceType::XPU);
+        impl.synchronizeStream(impl.getStream(c10::Device(c10::DeviceType::XPU)));
 #else
-        RTP_LLM_CHECK_WITH_INFO(false, "CUDA/HIP Graph is only supported on CUDA/ROCm platform");
+        RTP_LLM_LOG_WARNING("CUDA/HIP Graph is not supported on this platform, skipping");
+        enable_cuda_graph_ = false;
 #endif
         if (weights_.position_encoding) {
             graph_runner_->setPositionEncoding(weights_.position_encoding->kernel.cuda());

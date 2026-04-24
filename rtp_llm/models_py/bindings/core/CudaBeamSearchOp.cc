@@ -137,10 +137,10 @@ BeamSearchOutput sampleBeamSearch(const BeamSearchParams& params) {
 #undef DISPATCH_BOOL
 }
 
-#else  // !USING_CUDA — ROCm platform
+#else  // !USING_CUDA — ROCm / XPU fallback
 
 BeamSearchOutput sampleBeamSearch(const BeamSearchParams& params) {
-    RTP_LLM_CHECK_WITH_INFO(false, "beam search is not supported on ROCm yet");
+    RTP_LLM_CHECK_WITH_INFO(false, "beam search is not supported on ROCm/XPU yet");
     return BeamSearchOutput({});
 }
 

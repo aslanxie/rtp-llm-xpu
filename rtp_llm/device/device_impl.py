@@ -1017,3 +1017,41 @@ class RocmImpl(GpuImpl):
         # https://onnx.ai/onnx/technical/float8.html
         weight_scale = weight_scale * 2.0
         return weight, weight_scale
+
+
+class XpuImpl(GpuImpl):
+    """Intel XPU (GPU) device implementation using PyTorch XPU backend."""
+
+    def __init__(self):
+        super().__init__()
+
+    def get_device_id(self) -> int:
+        try:
+            return torch.xpu.current_device()
+        except Exception:
+            return 0
+
+    def _get_mem_info(self) -> MemInfo:
+        dev_id = self.get_device_id()
+        free = torch.xpu.mem_get_info(dev_id)[0]
+        total = torch.xpu.mem_get_info(dev_id)[1]
+        return MemInfo(used=total - free, free=free)
+
+    @property
+    def arch(self) -> str:
+        try:
+            dev_id = self.get_device_id()
+            name = torch.xpu.get_device_name(dev_id)
+            return name
+        except Exception as e:
+            logging.warning(f"Cannot get XPU device name: {e}")
+            return "unknown_xpu"
+
+    def preprocess_weights_for_mixed_gemm(
+        self,
+        tensor: torch.Tensor,
+        quant_mode: torch.dtype,
+        arch: str = "",
+    ) -> torch.Tensor:
+        # XPU: no custom mixed GEMM preprocessing; return as-is.
+        return tensor

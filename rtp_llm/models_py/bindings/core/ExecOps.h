@@ -58,7 +58,7 @@ void cudaProfilerEnd();
 // ===================================================================
 
 ExecStatus    getGpuExecStatus();
-torch::Device getTorchCudaDevice();
+torch::Device getTorchDevice();
 void          setTraceMemory(bool trace_memory);
 
 // ===================================================================

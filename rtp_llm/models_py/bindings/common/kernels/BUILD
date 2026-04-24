@@ -226,9 +226,11 @@ cc_library(
 
 cc_library(
     name = "fuse_copy_kernel",
-    srcs = [
-        "fuse_copy_kernel.cu",
-    ],
+    srcs = select({
+        "//:using_cuda": ["fuse_copy_kernel.cu"],
+        "//:using_rocm": ["fuse_copy_kernel.cu"],
+        "//conditions:default": [],
+    }),
     hdrs = [
         "fuse_copy_kernel.h",
     ],
@@ -242,22 +244,30 @@ cc_library(
 
 cc_library(
     name = "kernels_cu",
-    deps = [
-        ":kernels_activation",
-        ":kernels_layernorm",
-        ":kernels_sampling",
-        ":kernels_debug",
-        ":kernels_embedding",
-        ":kernels_tensor_ops",
-        ":kernels_kv_cache",
-        ":kernels_copy",
-        ":kernels_moe",
-    ] + select({
+    deps = select({
         "@//:using_cuda": [
+            ":kernels_activation",
+            ":kernels_layernorm",
+            ":kernels_sampling",
+            ":kernels_debug",
+            ":kernels_embedding",
+            ":kernels_tensor_ops",
+            ":kernels_kv_cache",
+            ":kernels_copy",
+            ":kernels_moe",
             "//rtp_llm/models_py/bindings/cuda/kernels:cuda_cu",
             "//rtp_llm/models_py/bindings/cuda/kernels:kernels_mla",
         ],
         "@//:using_rocm": [
+            ":kernels_activation",
+            ":kernels_layernorm",
+            ":kernels_sampling",
+            ":kernels_debug",
+            ":kernels_embedding",
+            ":kernels_tensor_ops",
+            ":kernels_kv_cache",
+            ":kernels_copy",
+            ":kernels_moe",
             "//rtp_llm/models_py/bindings/rocm/kernels:rocm_cu",
         ],
         "//conditions:default": [],
