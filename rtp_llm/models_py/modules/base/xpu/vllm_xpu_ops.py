@@ -96,7 +96,43 @@ def rotary_embedding(positions, query, key, head_size, cos_sin_cache, is_neox=Tr
     if _VLLM_XPU_AVAILABLE:
         torch.ops._C.rotary_embedding(positions, query, key, head_size, cos_sin_cache, is_neox)
     else:
-        pass  # fallback not needed if vllm-xpu-kernels available
+        # PyTorch fallback: apply rotary embeddings using cos/sin cache
+        rotary_dim = cos_sin_cache.shape[-1]
+        half_dim = rotary_dim // 2
+        cos_sin = cos_sin_cache[positions.long()]
+        cos = cos_sin[:, :half_dim]
+        sin = cos_sin[:, half_dim:]
+        # Apply to query
+        _apply_rotary_inplace(query, cos, sin, head_size, half_dim, is_neox)
+        # Apply to key
+        _apply_rotary_inplace(key, cos, sin, head_size, half_dim, is_neox)
+
+
+def _apply_rotary_inplace(x, cos, sin, head_size, half_dim, is_neox):
+    """Apply rotary embedding in-place to a [num_tokens, num_heads * head_size] tensor."""
+    num_tokens = x.shape[0]
+    total = x.shape[-1]
+    num_heads = total // head_size
+    x_view = x.view(num_tokens, num_heads, head_size)
+    if is_neox:
+        x1 = x_view[..., :half_dim]
+        x2 = x_view[..., half_dim:2*half_dim]
+        cos_e = cos.unsqueeze(1)
+        sin_e = sin.unsqueeze(1)
+        o1 = x1 * cos_e - x2 * sin_e
+        o2 = x2 * cos_e + x1 * sin_e
+        x_view[..., :half_dim] = o1
+        x_view[..., half_dim:2*half_dim] = o2
+    else:
+        # Interleaved style
+        x1 = x_view[..., 0:2*half_dim:2]
+        x2 = x_view[..., 1:2*half_dim:2]
+        cos_e = cos.unsqueeze(1)
+        sin_e = sin.unsqueeze(1)
+        o1 = x1 * cos_e - x2 * sin_e
+        o2 = x2 * cos_e + x1 * sin_e
+        x_view[..., 0:2*half_dim:2] = o1
+        x_view[..., 1:2*half_dim:2] = o2
 
 
 def flash_attn_varlen(q, k, v, cu_seqlens_q, cu_seqlens_k,

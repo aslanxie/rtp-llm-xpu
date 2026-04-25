@@ -12,7 +12,7 @@ from multiprocessing import Process
 from typing import List
 
 import torch
-from rtp_llm.utils.device_utils import gpu_is_available, gpu_device_count, get_visible_device_list
+from rtp_llm.device.device_impl import gpu_is_available, gpu_device_count, get_visible_device_list
 from setproctitle import setproctitle
 
 CUR_PATH = os.path.dirname(os.path.abspath(__file__))

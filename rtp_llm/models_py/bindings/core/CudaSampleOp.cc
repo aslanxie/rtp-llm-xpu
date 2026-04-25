@@ -556,6 +556,7 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
     }
 
     // 2. Repetition / presence / frequency penalty
+    // Uses vectorized PyTorch ops to avoid slow element-wise CPU access on device tensors.
     if (params.repetition_penalty.has_value()) {
         const auto& rep_pen  = params.repetition_penalty.value();
         const auto& pres_pen = params.presence_penalty.value();
@@ -567,26 +568,34 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
             if (rp == 1.0f && pp == 0.0f && fp == 0.0f) continue;
             auto row = params.logits[b];
             auto past_tokens = transposed_tokens.slice(0, 0, step + 1).select(1, b);
-            auto unique_tokens = std::get<0>(at::_unique(past_tokens));
-            auto scores = row.index_select(0, unique_tokens);
+
+            // Build frequency histogram on-device: freq_count[token_id] = count
+            // This replaces the O(step * unique_tokens) CPU-side nested loop.
+            auto freq_count = torch::zeros({vocab_size_padded},
+                                           past_tokens.options().dtype(torch::kFloat));
+            freq_count.scatter_add_(0, past_tokens.to(torch::kLong),
+                                    torch::ones({past_tokens.size(0)},
+                                                torch::TensorOptions().dtype(torch::kFloat)
+                                                    .device(past_tokens.device())));
+            auto appeared = freq_count > 0;  // mask of tokens that appeared
+
+            // Apply repetition penalty: score = score/rp if score>0, score*rp if score<0
             if (rp != 1.0f) {
-                auto pos_mask = scores > 0;
-                scores = torch::where(pos_mask, scores / rp, scores * rp);
+                auto pos_mask = (row > 0) & appeared;
+                auto neg_mask = (row < 0) & appeared;
+                // Divide positive scores by rp, multiply negative scores by rp
+                auto adjusted = torch::where(pos_mask, row / rp,
+                                torch::where(neg_mask, row * rp, row));
+                row.copy_(adjusted);
             }
-            if (pp != 0.0f) scores = scores - pp;
+            // Apply presence penalty: subtract pp for every appeared token
+            if (pp != 0.0f) {
+                row.sub_(pp * appeared.to(torch::kFloat));
+            }
+            // Apply frequency penalty: subtract fp*count for every token
             if (fp != 0.0f) {
-                // Count frequency of each token
-                for (int64_t t = 0; t < unique_tokens.size(0); t++) {
-                    int tok = unique_tokens[t].template item<int>();
-                    int count = 0;
-                    auto pt_ptr = past_tokens.template data_ptr<int32_t>();
-                    for (int64_t s = 0; s <= step; s++) {
-                        if (pt_ptr[s] == tok) count++;
-                    }
-                    scores[t] = scores[t] - fp * count;
-                }
+                row.sub_(fp * freq_count);
             }
-            row.index_copy_(0, unique_tokens, scores);
         }
     }
 
@@ -661,8 +670,16 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
     return GreedyOutput{};
 }
 
+// XPU: Speculative (draft-model) sampling is not supported.
+// This requires chain_speculative_sampling kernel which performs rejection sampling
+// between draft and target model probabilities. A pure PyTorch implementation would
+// need: (1) compute acceptance probability min(1, target_prob/draft_prob),
+// (2) accept/reject each drafted token, (3) resample rejected positions.
+// TODO(xpu): Implement PyTorch fallback when speculative decoding is needed on XPU.
 void chainSpeculativeSampling(const SpeculativeSamplingParams& params) {
-    RTP_LLM_CHECK_WITH_INFO(false, "speculative sampling is not supported on XPU yet");
+    RTP_LLM_CHECK_WITH_INFO(false,
+        "Speculative sampling is not supported on XPU. "
+        "Disable speculative decoding (draft model) when running on Intel GPU.");
 }
 
 #endif  // USING_CUDA / USING_ROCM / USING_XPU

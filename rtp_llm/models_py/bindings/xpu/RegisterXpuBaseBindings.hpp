@@ -2,6 +2,7 @@
 
 #include <torch/extension.h>
 #include <ATen/ATen.h>
+#include "rtp_llm/models_py/bindings/common/WriteCacheStoreOp.h"
 
 namespace py = pybind11;
 
@@ -48,14 +49,11 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                   py::arg("info_id"));
 
     // ── Write cache store ───────────────────────────────────────────────────
+    // Delegates to the shared WriteCacheStoreOp implementation (same as CUDA/ROCm).
+    // This writes KV cache data to the cache store for prefix reuse.
     rtp_ops_m.def("write_cache_store",
-                  [](const at::Tensor& /*input_lengths*/,
-                     const at::Tensor& /*prefix_lengths*/,
-                     const at::Tensor& /*kv_cache_block_id_host*/,
-                     py::object /*cache_store_member*/,
-                     py::object /*kv_cache*/) {
-                  },
-                  "WriteCacheStoreOp (no-op on XPU)",
+                  &rtp_llm::WriteCacheStoreOp,
+                  "WriteCacheStoreOp kernel",
                   py::arg("input_lengths"),
                   py::arg("prefix_lengths"),
                   py::arg("kv_cache_block_id_host"),
@@ -367,6 +365,8 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                   py::arg("input_embedding_scalar") = 1.0f);
 
     // ── Reuse KV cache indexed batched ──────────────────────────────────────
+    // MLA (Multi-head Latent Attention) is not supported on XPU.
+    // This op should never be called; fail loudly if it is.
     rtp_ops_m.def("reuse_kv_cache_indexed_batched",
                   [](at::Tensor& /*final_compressed_kv*/,
                      at::Tensor& /*final_k_pe*/,
@@ -377,8 +377,11 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                      py::object /*batch_reuse_info_vec*/,
                      const at::Tensor& /*qo_indptr*/,
                      int64_t /*tokens_per_block*/) {
+                      TORCH_CHECK(false,
+                          "reuse_kv_cache_indexed_batched is not implemented on XPU. "
+                          "MLA (Multi-head Latent Attention) is not supported.");
                   },
-                  "Reuse KV cache indexed batched (no-op on XPU)",
+                  "Reuse KV cache indexed batched (not implemented on XPU - MLA unsupported)",
                   py::arg("final_compressed_kv"),
                   py::arg("final_k_pe"),
                   py::arg("compressed_kv"),
@@ -476,13 +479,17 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                   py::arg("row_starts") = py::none());
 
     // ── Indexer K quant and cache ───────────────────────────────────────────
+    // KV cache quantization is not supported on XPU.
+    // Ensure the model config does not enable kv_cache_quant when running on XPU.
     rtp_ops_m.def("indexer_k_quant_and_cache",
                   [](const at::Tensor&, py::object,
                      const at::Tensor&, int64_t, int64_t) {
                       TORCH_CHECK(false,
-                          "indexer_k_quant_and_cache not implemented on XPU.");
+                          "indexer_k_quant_and_cache is not implemented on XPU. "
+                          "KV cache quantization is not supported on Intel GPU. "
+                          "Please disable kv_cache_quant in your model config.");
                   },
-                  "Indexer K quant and cache (not implemented on XPU)",
+                  "Indexer K quant and cache (not implemented on XPU - disable kv_cache_quant)",
                   py::arg("k"),
                   py::arg("kv_cache"),
                   py::arg("slot_mapping"),
