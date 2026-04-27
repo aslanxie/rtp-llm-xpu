@@ -57,10 +57,9 @@ public:
         // RUNNING -> DONE: error / finished
         evaluateAndUpdateStreams(running_streams_);
 
-        // PyWrappedModel currently does not support a mixed prefill+decode batch (see
-        // PyWrappedModel::buildPyAttentionInputs cu_seqlens slicing). Defer the gather
-        // until running streams drain so the next batch is pure prefill.
-        if (waiting_streams_.size() >= static_cast<size_t>(gather_batch_size_) && running_streams_.empty()) {
+        // Defer the gather until running streams drain so the next batch is pure prefill.
+        const bool python_model_busy = !running_streams_.empty();
+        if (waiting_streams_.size() >= static_cast<size_t>(gather_batch_size_) && !python_model_busy) {
             // Gather exactly gather_batch_size_ streams
             std::list<GenerateStreamPtr> new_streams;
             for (auto it = waiting_streams_.begin(); it != waiting_streams_.end(); it++) {

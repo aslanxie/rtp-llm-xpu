@@ -3,7 +3,6 @@
 #include "gtest/gtest.h"
 #include "rtp_llm/cpp/engine_base/schedulers/GatherBatchScheduler.h"
 #include "rtp_llm/cpp/normal_engine/NormalGenerateStream.h"
-#include "rtp_llm/cpp/core/Types.h"
 #include "rtp_llm/cpp/testing/TestBase.h"
 #include "rtp_llm/cpp/config/ConfigModules.h"
 
@@ -97,6 +96,30 @@ TEST_F(GatherBatchSchedulerTest, testGatherBatchAccumulatesBeforeRunning) {
     ASSERT_EQ(scheduler->runningStreamsSize(), 2);
 }
 
+// The scheduler always defers gather while running is non-empty, preventing mixed
+// prefill+decode batches that cause shape mismatches in PyWrappedModel.
+TEST_F(GatherBatchSchedulerTest, testGuardDefersGatherWhileRunningBusy) {
+    auto scheduler = makeScheduler();
+
+    auto stream1 = makeStream();
+    ASSERT_TRUE(scheduler->enqueue(stream1).ok());
+    auto streams_status1 = scheduler->schedule();
+    ASSERT_TRUE(streams_status1.ok());
+    ASSERT_EQ(scheduler->runningStreamsSize(), 1);
+
+    // Stream1 stays in running (still "decoding"). Enqueue a second stream and re-schedule.
+    auto stream2 = makeStream();
+    ASSERT_TRUE(scheduler->enqueue(stream2).ok());
+
+    // Schedule must NOT add stream2 to running while stream1 is still there.
+    auto streams_status2 = scheduler->schedule();
+    ASSERT_TRUE(streams_status2.ok());
+    ASSERT_EQ(scheduler->waitingStreamsSize(), 1);
+    ASSERT_EQ(scheduler->runningStreamsSize(), 1);
+    // The returned list is the unchanged running set (still just stream1).
+    ASSERT_EQ(streams_status2.value().size(), 1);
+}
+
 // With empty running the guard does not fire and the new stream is gathered immediately.
 TEST_F(GatherBatchSchedulerTest, testGuardAllowsGatherWhenRunningEmpty) {
     auto scheduler = makeScheduler();
@@ -108,34 +131,6 @@ TEST_F(GatherBatchSchedulerTest, testGuardAllowsGatherWhenRunningEmpty) {
     ASSERT_TRUE(streams_status.ok());
     ASSERT_EQ(scheduler->waitingStreamsSize(), 0);
     ASSERT_EQ(scheduler->runningStreamsSize(), 1);
-}
-
-// The core regression test: with a stream already running (i.e. potentially decoding), a
-// freshly enqueued stream must NOT be gathered. Mixing a context (prefill) stream into a
-// running decode batch is what triggered the
-// `output with shape [1] doesn't match the broadcast shape [2]` crash inside
-// PyWrappedModel::buildPyAttentionInputs.
-TEST_F(GatherBatchSchedulerTest, testGuardDefersGatherWhileRunningBusy) {
-    auto scheduler = makeScheduler();
-
-    // Step 1: stream1 enters running.
-    auto stream1 = makeStream();
-    ASSERT_TRUE(scheduler->enqueue(stream1).ok());
-    auto streams_status1 = scheduler->schedule();
-    ASSERT_TRUE(streams_status1.ok());
-    ASSERT_EQ(scheduler->runningStreamsSize(), 1);
-
-    // Step 2: stream1 stays in running (simulating it's still in decode). Enqueue stream2.
-    auto stream2 = makeStream();
-    ASSERT_TRUE(scheduler->enqueue(stream2).ok());
-
-    // Schedule must NOT add stream2 to running while stream1 is still there.
-    auto streams_status2 = scheduler->schedule();
-    ASSERT_TRUE(streams_status2.ok());
-    ASSERT_EQ(scheduler->waitingStreamsSize(), 1);
-    ASSERT_EQ(scheduler->runningStreamsSize(), 1);
-    // The returned list is the unchanged running set (still just stream1).
-    ASSERT_EQ(streams_status2.value().size(), 1);
 }
 
 // After the guard defers a gather, the deferred stream must be picked up as soon as the
@@ -167,9 +162,9 @@ TEST_F(GatherBatchSchedulerTest, testGuardResumesGatherAfterRunningDrains) {
 }
 
 // A pure prompt_batch arrival (the smoke-test scenario): N streams enqueued at once with
-// gather_batch_size=N. With running empty, the guard does not fire
-// and all N streams are gathered together as a single prefill batch.
-TEST_F(GatherBatchSchedulerTest, testGuardAllowsBatchGatherWhenRunningEmpty) {
+// gather_batch_size=N. With running empty, all N streams are gathered together as a single
+// prefill batch.
+TEST_F(GatherBatchSchedulerTest, testAllowsBatchGatherWhenRunningEmpty) {
     auto scheduler = makeScheduler();
     setGatherBatchSize(*scheduler, 3);
 
