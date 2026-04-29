@@ -132,7 +132,10 @@ struct FMHAConfig {
     bool        enable_xqa                    = true;
     bool        use_aiter_pa                  = true;
     bool        use_asm_pa                    = true;
-    bool        use_triton_pa                 = true;
+    // Default off: Triton PA on ROCm regressed vs ASM PA after the rocm_impl
+    // refactor; ASM/NonAsm now own the default decode path. Set to true to opt
+    // back into the Triton kernel.
+    bool        use_triton_pa                 = false;
     int64_t     absorb_opt_len                = 1024;
     std::string to_string() const;
 };
@@ -344,7 +347,6 @@ struct RuntimeConfig {
 
     // Scheduler configuration
     bool                       use_batch_decode_scheduler = false;
-    bool                       use_gather_batch_scheduler = false;
     BatchDecodeSchedulerConfig batch_decode_scheduler_config;
     FIFOSchedulerConfig        fifo_scheduler_config;
 
