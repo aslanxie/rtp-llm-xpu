@@ -236,13 +236,15 @@ inline PyWrappedModel::PyWrappedModel(const GptModelInitParams& params,
                                                          static_cast<int>(params.parallelism_config.tp_rank));
         }
 #elif USING_XPU
-        // XPU: use torch synchronize through device guard
+        // XPU: no CUDA graph support; just synchronize the device
         c10::impl::VirtualGuardImpl impl(c10::DeviceType::XPU);
         impl.synchronizeStream(impl.getStream(c10::Device(c10::DeviceType::XPU)));
+        enable_cuda_graph_ = false;
 #else
         RTP_LLM_LOG_WARNING("CUDA/HIP Graph is not supported on this platform, skipping");
         enable_cuda_graph_ = false;
 #endif
+#if USING_CUDA || USING_ROCM
         if (weights_.position_encoding) {
             graph_runner_->setPositionEncoding(weights_.position_encoding->kernel.cuda());
         }
@@ -254,6 +256,7 @@ inline PyWrappedModel::PyWrappedModel(const GptModelInitParams& params,
         auto py_initialize_method = py_instance.attr("initialize");
         py_init_result            = py_initialize_method(init_resources);
         graph_runner_->initCapture();
+#endif
     }
 
     auto py_init_success = py_init_result.cast<bool>();

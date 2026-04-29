@@ -143,7 +143,6 @@ cc_library(
         ],
         "//:using_xpu": [
             "//rtp_llm/cpp/cuda_graph:cuda_graph_base",
-            "//rtp_llm/cpp/cuda_graph:cuda_graph_hdrs_lib",
         ],
         "//conditions:default": [],
     }),
