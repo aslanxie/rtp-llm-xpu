@@ -62,13 +62,18 @@ class RMSResNorm(BaseResNorm):
         if _can_use_vllm(hidden_states):
             torch.ops._C.fused_add_rms_norm(hidden_states, residual, self.weight.data, self.variance_epsilon)
             return hidden_states
-        # PyTorch fallback — must update residual in-place for caller
+        # PyTorch fallback — must update both residual and hidden_states in-place
+        # to match vllm fused_add_rms_norm semantics:
+        #   residual <- residual + hidden_states
+        #   hidden_states <- RMSNorm(new_residual)
         residual.add_(hidden_states)
         input_dtype = residual.dtype
         r_float = residual.to(torch.float32)
         variance = r_float.pow(2).mean(-1, keepdim=True)
         normed = r_float * torch.rsqrt(variance + self.variance_epsilon)
-        return (self.weight * normed).to(input_dtype)
+        result = (self.weight * normed).to(input_dtype)
+        hidden_states.copy_(result)
+        return hidden_states
 
 
 class QKRMSNorm(nn.Module):
