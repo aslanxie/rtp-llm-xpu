@@ -67,10 +67,13 @@ def _need_rope(attn_configs):
     return getattr(attn_configs.rope_config, 'style', 0) != 0
 
 
-def _apply_rope(q, k, positions, rope_config, head_dim, num_heads, num_kv_heads, device, dtype):
+def _apply_rope(q, k, positions, rope_config, head_dim, num_heads, num_kv_heads, device, dtype, max_pos_hint=None):
     rotary_dim = getattr(rope_config, 'dim', 0) or head_dim
     is_neox = getattr(rope_config, 'is_neox_style', True)
-    raw_max = max(int(positions.max().item()) + 1, 4096)
+    if max_pos_hint is not None:
+        raw_max = max(max_pos_hint + 1, 4096)
+    else:
+        raw_max = max(int(positions.max().item()) + 1, 4096)
     # Round up to next power-of-2 to reduce unique cache entries
     max_pos = 1 << (raw_max - 1).bit_length()
     cos_sin_cache = _get_cos_sin_cache(rope_config, head_dim, max_pos, dtype, device)
@@ -93,7 +96,7 @@ def _apply_rope(q, k, positions, rope_config, head_dim, num_heads, num_kv_heads,
     return q_r.reshape(num_tokens, -1), k_r.reshape(num_tokens, -1)
 
 
-def _split_qkv_and_rope(qkv, attn_inputs, num_heads, num_kv_heads, head_dim, rope_config, need_rope):
+def _split_qkv_and_rope(qkv, attn_inputs, num_heads, num_kv_heads, head_dim, rope_config, need_rope, max_pos_hint=None):
     """Split QKV tensor and apply RoPE. Returns q, k, v as [tokens, heads, dim]."""
     total_tokens = qkv.shape[0]
     q_size = num_heads * head_dim
@@ -108,6 +111,7 @@ def _split_qkv_and_rope(qkv, attn_inputs, num_heads, num_kv_heads, head_dim, rop
         q_flat, k_flat = _apply_rope(
             q_flat, k_flat, positions, rope_config, head_dim,
             num_heads, num_kv_heads, qkv.device, qkv.dtype,
+            max_pos_hint=max_pos_hint,
         )
         q = q_flat.view(total_tokens, num_heads, head_dim)
         k = k_flat.view(total_tokens, num_kv_heads, head_dim)
@@ -279,16 +283,15 @@ class XpuVllmDecodeImpl(FMHAImplBase):
     def _paged_decode(self, qkv, kv_cache, layer_idx):
         """Decode using paged LayerKVCache with block_table support.
 
-        Uses flash_attn_varlen block_table parameter so the kernel reads
-        K,V directly from the paged cache — no manual gather needed.
-        Vectorized: position_ids, KV writes, block gather, and table remap
-        all use tensor ops instead of Python for-loops.
+        Optimized: uses CPU-side metadata to avoid GPU→CPU syncs, passes
+        block_table directly to flash_attn_varlen without unique/remap.
         """
         flash_attn_varlen = _get_flash_attn_varlen()
         seq_lengths = self.attn_inputs.sequence_lengths
-        block_ids_all = self.attn_inputs.kv_cache_block_id_device
-        if block_ids_all is None:
-            block_ids_all = self.attn_inputs.kv_cache_block_id_host
+
+        # --- Use CPU-side block IDs to avoid device→host sync ---
+        block_ids_host = self.attn_inputs.kv_cache_block_id_host
+        block_ids_device = self.attn_inputs.kv_cache_block_id_device
 
         try:
             num_requests = seq_lengths.numel() if seq_lengths is not None else 0
@@ -297,65 +300,66 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         if num_requests == 0:
             num_requests = 1
 
-        # Set position_ids for RoPE based on sequence lengths (vectorized)
+        # --- Keep seq_lengths on CPU; avoid GPU→CPU sync ---
+        if seq_lengths is not None:
+            seq_lens_cpu = seq_lengths if seq_lengths.is_cpu else seq_lengths.cpu()
+        else:
+            seq_lens_cpu = torch.zeros(num_requests, dtype=torch.long)
+
+        # Compute max position on CPU (no GPU sync) for RoPE cache sizing
+        max_pos_hint = int(seq_lens_cpu.max()) if seq_lens_cpu.numel() > 0 else 0
+
+        # Set position_ids for RoPE — CPU→device transfer (async, no sync)
         if self.need_rope:
-            self.attn_inputs.position_ids = seq_lengths.to(
+            self.attn_inputs.position_ids = seq_lens_cpu.to(
                 dtype=torch.long, device=qkv.device,
-            ) if seq_lengths is not None else torch.zeros(
-                num_requests, dtype=torch.long, device=qkv.device,
             )
 
         q_new, k_new, v_new = _split_qkv_and_rope(
             qkv, self.attn_inputs, self.num_heads, self.num_kv_heads,
             self.head_dim, self.rope_config, self.need_rope,
+            max_pos_hint=max_pos_hint,
         )
 
-        # Reshape block_ids to [num_requests, max_blocks]
-        bids_2d = block_ids_all.reshape(num_requests, -1)
-
-        # Write new K,V token to paged cache for each request
-        # (each request writes 1 token, so per-request call is unavoidable
-        #  since tokens go to different block positions)
-        seq_lens_cpu = seq_lengths.cpu() if seq_lengths is not None else torch.zeros(num_requests, dtype=torch.long)
-        kv_lens = (seq_lens_cpu + 1).tolist()
-        for i in range(num_requests):
-            _write_to_paged_cache(
-                k_new[i:i+1], v_new[i:i+1], kv_cache, bids_2d[i].cpu(),
-                int(seq_lens_cpu[i].item()), self.num_kv_heads, self.head_dim,
-            )
-
-        # Gather needed blocks and build block_table (vectorized)
         cache = kv_cache.kv_cache_base
         tpb = kv_cache.seq_size_per_block
 
-        bids_2d_cpu = bids_2d.cpu()
-        kv_lens_t = torch.tensor(kv_lens, dtype=torch.long)
-        n_blocks_per_req = (kv_lens_t + tpb - 1) // tpb
-        max_blocks_needed = int(n_blocks_per_req.max().item())
+        # --- Resolve block IDs on CPU without GPU sync ---
+        if block_ids_host is not None:
+            bids_2d_cpu = block_ids_host.reshape(num_requests, -1)
+        elif block_ids_device is not None:
+            bids_2d_cpu = block_ids_device.reshape(num_requests, -1).cpu()
+        else:
+            raise RuntimeError("No block IDs available for paged decode")
 
-        # Truncate to needed columns and collect unique block IDs
-        needed_bids_2d = bids_2d_cpu[:, :max_blocks_needed]
-        # Mask out padding blocks
-        col_idx = torch.arange(max_blocks_needed).unsqueeze(0)
-        valid_mask = col_idx < n_blocks_per_req.unsqueeze(1)
-        needed_flat = needed_bids_2d[valid_mask].long()
+        # --- Write new K,V tokens: scalar indexing, no tensor transfers ---
+        kv_lens = seq_lens_cpu + 1  # CPU tensor
+        for i in range(num_requests):
+            write_pos = int(seq_lens_cpu[i])
+            blk_slot = write_pos // tpb
+            offset = write_pos % tpb
+            bid = int(bids_2d_cpu[i, blk_slot])
+            cache[bid, 0, :, offset, :] = k_new[i]
+            cache[bid, 1, :, offset, :] = v_new[i]
 
-        # Unique block IDs with mapping
-        unique_bids, inverse = needed_flat.unique(return_inverse=True)
-        bid_tensor = unique_bids.to(cache.device)
+        # --- Build block_table directly — no unique, no remap ---
+        n_blocks_per_req = (kv_lens + tpb - 1) // tpb  # CPU tensor
+        max_blocks_needed = int(n_blocks_per_req.max())
 
-        # Gather needed blocks: [n_unique, 2, kv_heads, tpb, head_dim]
-        gathered = cache[bid_tensor]
+        # Gather only needed blocks (small subset of full cache)
+        needed_bids = bids_2d_cpu[:, :max_blocks_needed]  # [num_req, max_blocks], CPU
+        flat_bids = needed_bids.reshape(-1).long().to(cache.device)
+        gathered = cache[flat_bids]  # [num_req*max_blocks, 2, kv_heads, tpb, head_dim]
         k_cache = gathered[:, 0].transpose(1, 2).contiguous()
         v_cache = gathered[:, 1].transpose(1, 2).contiguous()
 
-        # Build remapped block_table using the inverse mapping
-        block_table_flat = torch.zeros(num_requests * max_blocks_needed, dtype=torch.int32)
-        block_table_flat[valid_mask.reshape(-1)] = inverse.int()
-        block_table = block_table_flat.reshape(num_requests, max_blocks_needed).to(qkv.device)
+        # Sequential block_table: blocks gathered in order
+        block_table = torch.arange(
+            flat_bids.numel(), dtype=torch.int32, device=qkv.device,
+        ).reshape(num_requests, max_blocks_needed)
 
-        max_kv_len = max(kv_lens)
-        seqused_k = torch.tensor(kv_lens, dtype=torch.int32, device=qkv.device)
+        max_kv_len = int(kv_lens.max())  # CPU tensor, no GPU sync
+        seqused_k = kv_lens.to(dtype=torch.int32, device=qkv.device)
         cu_q = torch.arange(0, num_requests + 1, dtype=torch.int32, device=qkv.device)
 
         output = flash_attn_varlen(
