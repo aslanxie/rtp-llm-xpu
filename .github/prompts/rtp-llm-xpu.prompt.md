@@ -12,7 +12,7 @@ You are an orchestration agent.
 ## Step 0: Load Configuration
 
 Read [.env](../.env) to load all variables:
-`WORK_DIR`, `REPO_URL`, `MODEL_NAME`, `MODEL_TYPE`, `MODEL_PATH`, `TP_SIZE`,
+`WORK_DIR`, `REPO_URL`, `BRANCH`, `MODEL_NAME`, `MODEL_TYPE`, `MODEL_PATH`, `TP_SIZE`,
 `ZE_AFFINITY_MASK`, `FRONTEND_SERVER_COUNT`, `DATASET_PATH`.
 
 Pass these variables to every skill invocation.

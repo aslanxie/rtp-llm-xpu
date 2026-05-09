@@ -1,6 +1,6 @@
 ---
 name: xpu-merge
-description: 'Sync rtp-llm-xpu main branch with upstream alibaba/rtp-llm:main. Use when: merging upstream, syncing fork, pulling latest upstream changes. Handles merge conflicts automatically.'
+description: 'Sync rtp-llm-xpu with upstream alibaba/rtp-llm:main. Use when: merging upstream, syncing fork, pulling latest upstream changes. Handles merge conflicts automatically.'
 ---
 
 # Merge Upstream into rtp-llm-xpu
@@ -9,36 +9,43 @@ description: 'Sync rtp-llm-xpu main branch with upstream alibaba/rtp-llm:main. U
 
 - **WORK_DIR** — absolute path to the local rtp-llm-xpu workspace
 - **REPO_URL** — the rtp-llm-xpu fork Git URL
+- **BRANCH** — the local branch to merge into (default: `main`)
 
 ## When to Use
 - Syncing the fork with the latest alibaba/rtp-llm:main
-- Pulling upstream changes into the local main branch
+- Pulling upstream changes into the local branch
 
 ## Procedure
 
-1. Ensure origin points to the user's fork:
-   ```
-   cd $WORK_DIR
-   git remote set-url origin $REPO_URL 2>/dev/null || git remote add origin $REPO_URL
-   git remote set-url upstream https://github.com/alibaba/rtp-llm.git 2>/dev/null || git remote add upstream https://github.com/alibaba/rtp-llm.git
-   ```
+Follow these steps EXACTLY in order. Do NOT run any commands outside this procedure.
 
-2. Switch to main and pull latest:
-   ```
-   cd $WORK_DIR
-   git checkout main
-   git pull origin main
-   ```
+### 1. Configure Remotes
 
-3. Fetch upstream and merge:
-   ```
-   git fetch upstream
-   git merge upstream/main
-   ```
+```
+cd $WORK_DIR
+git remote set-url origin $REPO_URL 2>/dev/null || git remote add origin $REPO_URL
+git remote set-url upstream https://github.com/alibaba/rtp-llm.git 2>/dev/null || git remote add upstream https://github.com/alibaba/rtp-llm.git
+```
 
-4. Handle merge result:
-   - **Clean merge**: Record the new merge commit hash. Done.
-   - **Conflicts**: Follow the conflict resolution procedure below.
+### 2. Switch to Branch and Pull Latest
+
+```
+cd $WORK_DIR
+git checkout $BRANCH
+git pull origin $BRANCH
+```
+
+### 3. Fetch Upstream and Merge
+
+```
+git fetch upstream
+git merge upstream/main
+```
+
+### 4. Handle Merge Result
+
+- **Clean merge**: Record the new merge commit hash. Done.
+- **Conflicts**: Follow the conflict resolution procedure below.
 
 ## Conflict Resolution
 

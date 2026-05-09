@@ -75,9 +75,9 @@ lm-eval --model local-chat-completions \
     --tasks gsm8k \
     --model_args "model=$MODEL_NAME,base_url=http://localhost:8088/v1/chat/completions,enable_thinking=True,think_end_token='</think>',max_gen_toks=1024" \
     --apply_chat_template \
-    --num_fewshot 8 \
+    --num_fewshot 3 \
     --batch_size 1 \
-    --limit 10
+    --limit 50
 ```
 
 This runs 10 GSM8K items with 8-shot prompting. Takes ~5-10 minutes.
