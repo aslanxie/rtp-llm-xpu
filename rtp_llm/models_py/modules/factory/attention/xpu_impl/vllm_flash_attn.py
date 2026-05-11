@@ -27,6 +27,20 @@ def _get_flash_attn_varlen():
     return _flash_attn_varlen
 
 
+# ── Cached arange tensors (avoid per-layer recreation) ─────────────────
+_arange_cache = {}  # (max_size, device) -> tensor
+
+def _get_arange(size, dtype, device):
+    """Return a cached arange [0..size), growing the cache as needed."""
+    key = str(device)
+    cached = _arange_cache.get(key)
+    if cached is not None and cached.numel() >= size:
+        return cached[:size].to(dtype=dtype)
+    t = torch.arange(max(size, 256), dtype=torch.int32, device=device)
+    _arange_cache[key] = t
+    return t[:size].to(dtype=dtype)
+
+
 # ── RoPE ────────────────────────────────────────────────────────────────────
 
 _COS_SIN_CACHE: Dict = {}
@@ -79,9 +93,8 @@ def _apply_rope(q, k, positions, rope_config, head_dim, num_heads, num_kv_heads,
     cos_sin_cache = _get_cos_sin_cache(rope_config, head_dim, max_pos, dtype, device)
     try:
         from rtp_llm.models_py.modules.base.xpu.vllm_xpu_ops import rotary_embedding as vllm_rope
-        q_c, k_c = q.contiguous(), k.contiguous()
-        vllm_rope(positions, q_c, k_c, head_dim, cos_sin_cache, is_neox)
-        return q_c, k_c
+        vllm_rope(positions, q, k, head_dim, cos_sin_cache, is_neox)
+        return q, k
     except Exception:
         pass
     num_tokens = q.shape[0]
@@ -348,19 +361,24 @@ class XpuVllmDecodeImpl(FMHAImplBase):
 
         # Gather only needed blocks (small subset of full cache)
         needed_bids = bids_2d_cpu[:, :max_blocks_needed]  # [num_req, max_blocks], CPU
-        flat_bids = needed_bids.reshape(-1).long().to(cache.device)
+        # Cache flat_bids on device — same block IDs for all layers within a step
+        _bids_key = (needed_bids.shape[0], needed_bids.shape[1])
+        if not hasattr(self, '_cached_flat_bids') or self._cached_flat_bids_key != _bids_key:
+            self._cached_flat_bids = needed_bids.reshape(-1).long().to(cache.device)
+            self._cached_flat_bids_key = _bids_key
+        flat_bids = self._cached_flat_bids
         gathered = cache[flat_bids]  # [num_req*max_blocks, 2, kv_heads, tpb, head_dim]
         k_cache = gathered[:, 0].transpose(1, 2).contiguous()
         v_cache = gathered[:, 1].transpose(1, 2).contiguous()
 
-        # Sequential block_table: blocks gathered in order
-        block_table = torch.arange(
-            flat_bids.numel(), dtype=torch.int32, device=qkv.device,
+        # Sequential block_table: blocks gathered in order (cached)
+        block_table = _get_arange(
+            flat_bids.numel(), torch.int32, qkv.device,
         ).reshape(num_requests, max_blocks_needed)
 
         max_kv_len = int(kv_lens.max())  # CPU tensor, no GPU sync
         seqused_k = kv_lens.to(dtype=torch.int32, device=qkv.device)
-        cu_q = torch.arange(0, num_requests + 1, dtype=torch.int32, device=qkv.device)
+        cu_q = _get_arange(num_requests + 1, torch.int32, qkv.device)
 
         output = flash_attn_varlen(
             q_new.contiguous(),

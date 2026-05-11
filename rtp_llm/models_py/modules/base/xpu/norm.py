@@ -111,21 +111,20 @@ class QKRMSNorm(nn.Module):
 
     def forward(self, hidden_states):
         if _can_use_vllm(hidden_states):
-            # Normalize Q and K in-place, avoiding torch.cat allocation
+            # Normalize Q and K, write back to hidden_states
             q_slice = hidden_states[..., :self.q_size]
             q_flat = q_slice.reshape(-1, self.size_per_head)
             q_out = torch.empty_like(q_flat)
             torch.ops._C.rms_norm(q_out, q_flat, self.q_norm.weight.data, self.variance_epsilon)
-            # Write normalized Q back through the view
             q_slice.copy_(q_out.view_as(q_slice))
-        
+
             ks = self.q_size
             k_slice = hidden_states[..., ks:ks + self.kv_size]
             k_flat = k_slice.reshape(-1, self.size_per_head)
             k_out = torch.empty_like(k_flat)
             torch.ops._C.rms_norm(k_out, k_flat, self.k_norm.weight.data, self.variance_epsilon)
             k_slice.copy_(k_out.view_as(k_slice))
-        
+
             return hidden_states
         
         q, k, v = hidden_states.split([self.q_size, self.kv_size, self.kv_size], dim=-1)

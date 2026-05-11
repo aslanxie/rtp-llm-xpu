@@ -13,6 +13,7 @@ from rtp_llm.models_py.modules import (
     Embedding,
     FMHAImplBase,
     RMSNorm,
+    RMSResNorm,
 )
 from rtp_llm.ops import HWKernelConfig, ParallelismConfig
 from rtp_llm.ops.compute_ops import LayerKVCache, PyModelInputs, PyModelOutputs
@@ -50,7 +51,7 @@ class Qwen3DecoderLayer(nn.Module):
         self.input_layernorm = RMSNorm(
             weights[W.pre_ln_gamma], eps=config.layernorm_eps
         )
-        self.post_attention_layernorm = RMSNorm(
+        self.post_attention_layernorm = RMSResNorm(
             weights[W.post_ln_gamma], eps=config.layernorm_eps
         )
 
@@ -66,11 +67,8 @@ class Qwen3DecoderLayer(nn.Module):
         hidden_states = self.self_attn(
             hidden_states=hidden_states, fmha_impl=fmha_impl, kv_cache=kv_cache
         )
-        hidden_states = residual + hidden_states
-
-        # Fully Connected
-        residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
+        # Fused residual-add + RMSNorm: residual += hidden_states; norm(residual)
+        hidden_states = self.post_attention_layernorm(hidden_states, residual)
         hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
 
