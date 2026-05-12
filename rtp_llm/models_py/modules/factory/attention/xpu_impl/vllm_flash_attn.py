@@ -227,11 +227,22 @@ class XpuVllmPrefillImpl(FMHAImplBase):
                 input_lengths = self.attn_inputs.input_lengths
                 if input_lengths is not None and input_lengths.numel() > 1:
                     # Batched prefill: write each request separately
+                    num_reqs = input_lengths.numel()
                     offsets = torch.cat([torch.zeros(1, dtype=torch.int32), input_lengths.cpu().cumsum(0)])
-                    for req_idx in range(input_lengths.numel()):
+                    # block_ids_all may be [num_reqs, blocks_per_req] or [1, total_blocks]
+                    # Reshape to [num_reqs, -1] if needed
+                    if block_ids_all.dim() == 1:
+                        blocks_per_req = block_ids_all.numel() // num_reqs
+                        bids_2d = block_ids_all.reshape(num_reqs, blocks_per_req)
+                    elif block_ids_all.shape[0] == num_reqs:
+                        bids_2d = block_ids_all
+                    else:
+                        blocks_per_req = block_ids_all.numel() // num_reqs
+                        bids_2d = block_ids_all.reshape(num_reqs, blocks_per_req)
+                    for req_idx in range(num_reqs):
                         start = int(offsets[req_idx])
                         end = int(offsets[req_idx + 1])
-                        bids = block_ids_all[req_idx].cpu()
+                        bids = bids_2d[req_idx].cpu()
                         _write_to_paged_cache(
                             k[start:end], v[start:end], kv_cache, bids, 0,
                             self.num_kv_heads, self.head_dim,
