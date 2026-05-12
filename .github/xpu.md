@@ -14,7 +14,7 @@ All skills are orchestrated through a single prompt file and configured via a sh
 ├── prompts/
 │   └── rtp-llm-xpu.prompt.md            # Orchestration prompt
 └── skills/
-    ├── xpu-merge/SKILL.md               # Phase: merge
+    ├── xpu-sync/SKILL.md                # Phase: sync
     ├── xpu-build/SKILL.md               # Phase: build
     ├── xpu-verify/SKILL.md              # Phase: verify
     ├── xpu-perf-benchmark/SKILL.md      # Phase: perf
@@ -68,7 +68,7 @@ In VS Code Copilot Chat (Agent mode), type:
 
 | Phase | Skill | What It Does | Duration |
 |-------|-------|--------------|----------|
-| `merge` | `xpu-merge` | Fetch upstream `alibaba/rtp-llm:main` and merge into local `main`. Auto-resolves conflicts. | ~1 min |
+| `sync` | `xpu-sync` | Fetch upstream `alibaba/rtp-llm:main` and sync into local `main`. Auto-resolves conflicts. | ~1 min |
 | `build` | `xpu-build` | Bazel build with `--config=xpu`. Auto-fixes common build errors and retries. | ~10-30 min |
 | `verify` | `xpu-verify` | Start the inference service, health-check, run a "2+2" function test. | ~2-3 min |
 | `perf` | `xpu-perf-benchmark` | Run `vllm bench serve` with 100 ShareGPT prompts. Reports throughput, TPOT, TTFT. | ~15-20 min |
@@ -81,10 +81,10 @@ In VS Code Copilot Chat (Agent mode), type:
 /rtp-llm-xpu
 
 # Merge upstream and build only
-/rtp-llm-xpu merge, build
+/rtp-llm-xpu sync, build
 
 # Full pipeline minus accuracy
-/rtp-llm-xpu merge, build, verify, perf
+/rtp-llm-xpu sync, build, verify, perf
 
 # Just run performance benchmark (service must already be running)
 /rtp-llm-xpu perf
@@ -97,12 +97,12 @@ In VS Code Copilot Chat (Agent mode), type:
 
 Phases always execute in this fixed order regardless of input order:
 
-**merge → build → verify → perf → accuracy**
+**sync → build → verify → perf → accuracy**
 
 ### Dependencies
 
 ```
-merge ──► build ──► verify ──► perf
+sync ──► build ──► verify ──► perf
                         │
                         └────► accuracy
 ```
@@ -119,7 +119,7 @@ After execution, a summary table is generated with only the rows for phases that
 
 | Item                    | Result          |
 |-------------------------|-----------------|
-| Upstream sync           | ✅ merged       |
+| Upstream sync           | ✅ synced       |
 | Merge commit            | abc1234         |
 | Build                   | ✅ pass         |
 | Function test (2+2)     | ✅ pass         |
@@ -137,6 +137,6 @@ After execution, a summary table is generated with only the rows for phases that
 | Problem | Solution |
 |---------|----------|
 | Service not healthy for `perf`/`accuracy` | Run `verify` phase first, or start the service manually |
-| Build fails after merge | The `build` skill auto-retries with fixes. If it still fails, check the error log and fix manually |
-| Merge conflicts | The `merge` skill auto-resolves most conflicts. XPU-specific files keep local changes; upstream files accept upstream changes |
+| Build fails after sync | The `build` skill auto-retries with fixes. If it still fails, check the error log and fix manually |
+| Merge conflicts | The `sync` skill auto-resolves most conflicts. XPU-specific files keep local changes; upstream files accept upstream changes |
 | Benchmark metrics truncated | The `perf` skill uses `tail -60` to capture full output. Do not reduce this value |

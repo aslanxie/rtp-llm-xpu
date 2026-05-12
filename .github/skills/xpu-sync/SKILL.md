@@ -1,6 +1,6 @@
 ---
-name: xpu-merge
-description: 'Sync rtp-llm-xpu with upstream alibaba/rtp-llm:main. Use when: merging upstream, syncing fork, pulling latest upstream changes. Handles merge conflicts automatically.'
+name: xpu-sync
+description: 'Sync rtp-llm-xpu with upstream alibaba/rtp-llm:main. Use when: syncing upstream, syncing fork, pulling latest upstream changes. Handles merge conflicts automatically.'
 ---
 
 # Merge Upstream into rtp-llm-xpu

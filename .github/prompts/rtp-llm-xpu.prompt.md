@@ -2,7 +2,7 @@
 description: "Orchestrate rtp-llm-xpu upstream sync, build, and full verification (function, performance, accuracy) on Intel XPU"
 agent: "agent"
 tools: [execute, read, search, todo]
-argument-hint: "merge, build, verify, perf, accuracy"
+argument-hint: "sync, build, verify, perf, accuracy"
 ---
 
 # Auto-Merge & Verify rtp-llm-xpu
@@ -23,14 +23,14 @@ Parse the user's message for which phases to run. The available phases are:
 
 | Keyword | Skill | Description |
 |---------|-------|-------------|
-| `merge` | `xpu-merge` | Sync with upstream |
+| `sync` | `xpu-sync` | Sync with upstream |
 | `build` | `xpu-build` | Compile XPU target |
 | `verify` | `xpu-verify` | Start service + function test |
 | `perf` | `xpu-perf-benchmark` | Throughput benchmark |
 | `accuracy` | `xpu-accuracy-benchmark` | GSM8K evaluation |
 
 Rules:
-- If user specifies phases (e.g., `merge, build, verify`), run ONLY those phases in order
+- If user specifies phases (e.g., `sync, build, verify`), run ONLY those phases in order
 - If user provides no phases, run ALL phases in order
 - Always run phases in the order listed above, regardless of user input order
 

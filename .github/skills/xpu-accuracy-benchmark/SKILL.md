@@ -16,7 +16,7 @@ description: 'Run GSM8K accuracy evaluation on rtp-llm-xpu using lm-eval. Use wh
 - **FRONTEND_SERVER_COUNT** — number of frontend servers
 
 ## When to Use
-- Validating model accuracy after merge or code changes
+- Validating model accuracy after sync or code changes
 - Checking that optimizations don't degrade correctness
 - Math reasoning evaluation
 
