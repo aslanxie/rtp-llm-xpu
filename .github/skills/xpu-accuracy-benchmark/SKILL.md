@@ -66,21 +66,27 @@ Expected response: `"ok"` or `{"status":"ok"}`
 
 ### 3. Run lm-eval
 
+Set up environment:
 ```
-cd $WORK_DIR
 export HF_ENDPOINT="https://hf-mirror.com"
 export no_proxy="localhost,127.0.0.1"
-
-lm-eval --model local-chat-completions \
-    --tasks gsm8k \
-    --model_args "model=$MODEL_NAME,base_url=http://localhost:8088/v1/chat/completions,enable_thinking=True,think_end_token='</think>',max_gen_toks=1024" \
-    --apply_chat_template \
-    --num_fewshot 3 \
-    --batch_size 1 \
-    --limit 50
 ```
 
-This runs 10 GSM8K items with 8-shot prompting. Takes ~5-10 minutes.
+Then run:
+```
+cd $WORK_DIR
+lm-eval --model local-chat-completions \
+    --tasks gsm8k \
+    --model_args "model=$MODEL_NAME,base_url=http://localhost:8088/v1/chat/completions,max_gen_toks=1024" \
+    --apply_chat_template \
+    --num_fewshot 5 \
+    --batch_size 1 \
+    --limit 10
+```
+
+This runs 10 GSM8K items with 5-shot prompting using greedy decoding. Takes ~5-10 minutes.
+
+**Note:** Do NOT use `--gen_kwargs` with `max_new_tokens` — the `local-chat-completions` backend does not convert it to `max_tokens`. Use `max_gen_toks` in `--model_args` instead.
 
 ### 4. Extract Metrics
 
@@ -88,7 +94,7 @@ From the lm-eval output table, extract:
 - **flexible-extract** score (0.0-1.0) — lenient answer extraction
 - **strict-match** score (0.0-1.0) — exact match
 
-Expected baseline for Qwen3-8B: ~0.7 or above on both metrics with 10 items.
+Expected baseline for Qwen3-8B: ~0.7 or above on flexible-extract with 10 items.
 
 ## Output
 - Report: flexible-extract score, strict-match score, number of items evaluated
