@@ -13,9 +13,7 @@ from rtp_llm.utils.model_weight import W
 
 # Import device-specific FusedQKRMSNorm
 device_type = get_device_type()
-if device_type == DeviceType.Xpu:
-    from rtp_llm.models_py.modules.base.xpu.norm import FusedQKRMSNorm
-elif device_type == DeviceType.ROCm:
+if device_type == DeviceType.ROCm:
     from rtp_llm.models_py.modules.base.rocm.norm import FusedQKRMSNorm
 else:
     from rtp_llm.models_py.modules.base.cuda.norm import FusedQKRMSNorm
@@ -88,7 +86,7 @@ class CausalAttention(nn.Module):
         if self.qk_fuse_norm is not None:
             qkv = self.qk_fuse_norm(qkv)
         attn_output = fmha_impl.forward(qkv, kv_cache, self.layer_idx)
-        attn_output = attn_output.reshape(*input_shape, -1)
+        attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         if gate is not None:
             attn_output = attn_output * torch.sigmoid(gate)
         output = self.o_proj(attn_output)
