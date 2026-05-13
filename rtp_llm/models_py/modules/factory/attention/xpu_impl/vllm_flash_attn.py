@@ -11,6 +11,7 @@ from typing import Dict, Optional, Tuple
 import torch
 import torch.nn.functional as F
 
+from rtp_llm.models_py.modules.factory.attention import common
 from rtp_llm.models_py.modules.factory.attention.fmha_impl_base import FMHAImplBase
 from rtp_llm.ops import AttentionConfigs, ParallelismConfig
 from rtp_llm.ops.compute_ops import LayerKVCache, PyAttentionInputs
@@ -205,6 +206,9 @@ class XpuVllmPrefillImpl(FMHAImplBase):
         self.rope_config = attn_configs.rope_config
         self.need_rope = _need_rope(attn_configs)
         self.fmha_params = None
+        # PD disaggregation: register KV blocks with cache_store after writing
+        self.write_cache_store_impl = common.create_write_cache_store_impl(attn_inputs)
+        logger.warning("[XPU PD] XpuVllmPrefillImpl init is_prefill=%s cache_store_inputs=%s write_op=%s", attn_inputs.is_prefill, bool(attn_inputs.cache_store_inputs), self.write_cache_store_impl is not None)
 
     @staticmethod
     def support(attn_configs, attn_inputs):
@@ -251,6 +255,23 @@ class XpuVllmPrefillImpl(FMHAImplBase):
                     bids = block_ids_all[0].cpu()
                     _write_to_paged_cache(k, v, kv_cache, bids, 0,
                                           self.num_kv_heads, self.head_dim)
+
+            # PD disaggregation: notify cache_store the KV blocks for this request
+            # are ready so the decode side can fetch them via P2P RPC.
+            if self.write_cache_store_impl is not None and layer_idx <= 1:
+                ai = self.attn_inputs
+                def _shape(t):
+                    return None if t is None else (tuple(t.shape) if hasattr(t,"shape") else "?")
+                logger.warning(
+                    "[XPU PD] write_cache_store layer=%s in_len=%s prefix_len=%s blkid_host=%s",
+                    layer_idx,
+                    _shape(ai.input_lengths),
+                    _shape(ai.prefix_lengths),
+                    _shape(ai.kv_cache_block_id_host),
+                )
+            common.apply_write_cache_store(
+                self.write_cache_store_impl, self.attn_inputs, kv_cache
+            )
 
         cu_seqlens = self.attn_inputs.cu_seqlens
         if cu_seqlens is None or cu_seqlens.numel() <= 1:
@@ -370,19 +391,41 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         n_blocks_per_req = (kv_lens + tpb - 1) // tpb  # CPU tensor
         max_blocks_needed = int(n_blocks_per_req.max())
 
-        # Gather only needed blocks (small subset of full cache)
-        needed_bids = bids_2d_cpu[:, :max_blocks_needed]  # [num_req, max_blocks], CPU
-        # Cache flat_bids on device — same block IDs for all layers within a step
-        _bids_key = (needed_bids.shape[0], needed_bids.shape[1])
-        if not hasattr(self, '_cached_flat_bids') or self._cached_flat_bids_key != _bids_key:
-            self._cached_flat_bids = needed_bids.reshape(-1).long().to(cache.device)
-            self._cached_flat_bids_key = _bids_key
-        flat_bids = self._cached_flat_bids
-        gathered = cache[flat_bids]  # [num_req*max_blocks, 2, kv_heads, tpb, head_dim]
-        k_cache = gathered[:, 0].transpose(1, 2).contiguous()
-        v_cache = gathered[:, 1].transpose(1, 2).contiguous()
+        # Memory-optimized gather: view-transpose (free) then advanced-index
+        # (single copy). Avoids the large 'gathered' intermediate that caused
+        # OOM with batched decode.
+        # cache: [total_blocks, 2, kv_heads, tpb, head_dim]
+        # view:  [total_blocks, tpb, kv_heads, head_dim]  (transpose, no alloc)
+        # gather:[N_blocks, tpb, kv_heads, head_dim]      (single contiguous copy)
+        needed_bids = bids_2d_cpu[:, :max_blocks_needed]
+        flat_bids = needed_bids.reshape(-1).long().to(cache.device)
+        nb = flat_bids.numel()
+        H = self.num_kv_heads
+        D = self.head_dim
+        need_size = nb * tpb * H * D
+        # Reuse persistent class-level scratch buffers per device to eliminate
+        # per-call XPU allocations across N layers x M tokens. Four buffers:
+        # k_gath/v_gath are filled by index_select(out=) in [Nb,H,T,D] layout;
+        # k_out/v_out hold the transposed [Nb,T,H,D] tensor that flash_attn
+        # paged-attention expects. Buffers grow monotonically with workload.
+        cls = type(self)
+        scratch = getattr(cls, "_kv_scratch", None)
+        if scratch is None or scratch[0].device != cache.device or \
+                scratch[0].dtype != cache.dtype or \
+                scratch[0].numel() < need_size:
+            mk = lambda: torch.empty(need_size, dtype=cache.dtype, device=cache.device)
+            cls._kv_scratch = (mk(), mk(), mk(), mk())
+            scratch = cls._kv_scratch
+        k_gath = scratch[0][:need_size].view(nb, H, tpb, D)
+        v_gath = scratch[1][:need_size].view(nb, H, tpb, D)
+        k_cache = scratch[2][:need_size].view(nb, tpb, H, D)
+        v_cache = scratch[3][:need_size].view(nb, tpb, H, D)
+        torch.index_select(cache[:, 0], 0, flat_bids, out=k_gath)
+        torch.index_select(cache[:, 1], 0, flat_bids, out=v_gath)
+        k_cache.copy_(k_gath.transpose(1, 2))
+        v_cache.copy_(v_gath.transpose(1, 2))
 
-        # Sequential block_table: blocks gathered in order (cached)
+        # Sequential block_table: blocks gathered in order
         block_table = _get_arange(
             flat_bids.numel(), torch.int32, qkv.device,
         ).reshape(num_requests, max_blocks_needed)
