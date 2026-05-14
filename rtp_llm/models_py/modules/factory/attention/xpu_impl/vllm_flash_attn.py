@@ -354,11 +354,24 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         # Compute max position on CPU (no GPU sync) for RoPE cache sizing
         max_pos_hint = int(seq_lens_cpu.max()) if seq_lens_cpu.numel() > 0 else 0
 
-        # Set position_ids for RoPE — CPU→device transfer (async, no sync)
+        # Class-level step caches (shared across all layers in one decode step).
+        cls = type(self)
+        # Set position_ids for RoPE — CPU→device transfer (async, no sync).
+        # Hoist across layers: identical for all 36 layers in a decode step.
         if self.need_rope:
-            self.attn_inputs.position_ids = seq_lens_cpu.to(
-                dtype=torch.long, device=qkv.device,
+            _pid_key = (
+                seq_lens_cpu.data_ptr(),
+                seq_lens_cpu.numel(),
+                int(seq_lens_cpu[0]) if seq_lens_cpu.numel() > 0 else 0,
+                qkv.device,
             )
+            _pid_cache = getattr(cls, "_pos_ids_cache", None)
+            if _pid_cache is not None and _pid_cache[0] == _pid_key:
+                self.attn_inputs.position_ids = _pid_cache[1]
+            else:
+                _pid = seq_lens_cpu.to(dtype=torch.long, device=qkv.device)
+                cls._pos_ids_cache = (_pid_key, _pid)
+                self.attn_inputs.position_ids = _pid
 
         q_new, k_new, v_new = _split_qkv_and_rope(
             qkv, self.attn_inputs, self.num_heads, self.num_kv_heads,
@@ -398,7 +411,24 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         # view:  [total_blocks, tpb, kv_heads, head_dim]  (transpose, no alloc)
         # gather:[N_blocks, tpb, kv_heads, head_dim]      (single contiguous copy)
         needed_bids = bids_2d_cpu[:, :max_blocks_needed]
-        flat_bids = needed_bids.reshape(-1).long().to(cache.device)
+        # Hoist flat_bids construction to step-level: identical across all
+        # layers in a single decode step, so cache by (CPU buffer data_ptr,
+        # shape, device). Eliminates 35 redundant CPU->XPU copies per step
+        # for a 36-layer model.
+        _fb_key = (
+            needed_bids.data_ptr(),
+            needed_bids.shape[0],
+            needed_bids.shape[1],
+            seq_lens_cpu.data_ptr(),
+            int(seq_lens_cpu[0]) if seq_lens_cpu.numel() > 0 else 0,
+            cache.device,
+        )
+        _fb_cache = getattr(cls, "_flat_bids_cache", None)
+        if _fb_cache is not None and _fb_cache[0] == _fb_key:
+            flat_bids = _fb_cache[1]
+        else:
+            flat_bids = needed_bids.reshape(-1).long().to(cache.device)
+            cls._flat_bids_cache = (_fb_key, flat_bids)
         nb = flat_bids.numel()
         H = self.num_kv_heads
         D = self.head_dim
@@ -408,7 +438,6 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         # k_gath/v_gath are filled by index_select(out=) in [Nb,H,T,D] layout;
         # k_out/v_out hold the transposed [Nb,T,H,D] tensor that flash_attn
         # paged-attention expects. Buffers grow monotonically with workload.
-        cls = type(self)
         scratch = getattr(cls, "_kv_scratch", None)
         if scratch is None or scratch[0].device != cache.device or \
                 scratch[0].dtype != cache.dtype or \
@@ -431,7 +460,20 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         ).reshape(num_requests, max_blocks_needed)
 
         max_kv_len = int(kv_lens.max())  # CPU tensor, no GPU sync
-        seqused_k = kv_lens.to(dtype=torch.int32, device=qkv.device)
+        # Hoist seqused_k across layers: kv_lens identical for all layers
+        # in one decode step. Saves N-1 CPU->XPU copies per step.
+        _sk_key = (
+            kv_lens.data_ptr(),
+            kv_lens.numel(),
+            int(kv_lens[0]) if kv_lens.numel() > 0 else 0,
+            qkv.device,
+        )
+        _sk_cache = getattr(cls, "_seqused_k_cache", None)
+        if _sk_cache is not None and _sk_cache[0] == _sk_key:
+            seqused_k = _sk_cache[1]
+        else:
+            seqused_k = kv_lens.to(dtype=torch.int32, device=qkv.device)
+            cls._seqused_k_cache = (_sk_key, seqused_k)
         cu_q = _get_arange(num_requests + 1, torch.int32, qkv.device)
 
         output = flash_attn_varlen(
