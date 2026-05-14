@@ -27,7 +27,7 @@ Follow these steps EXACTLY in order. Do NOT run any commands outside this proced
 ### 1. Check Service Health
 
 ```
-unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+export no_proxy="localhost,127.0.0.1"
 curl -sS --max-time 5 http://localhost:8088/health
 ```
 
@@ -36,9 +36,11 @@ curl -sS --max-time 5 http://localhost:8088/health
 
 ### 2. Launch Service
 
-Use the **xpu-service** skill to launch the service. It will automatically select the correct mode based on `ZE_AFFINITY_MASK`:
+Use the **xpu-service** skill to launch the service with `--think_mode 0`. It will automatically select the correct mode based on `ZE_AFFINITY_MASK`:
 - Single value (e.g., `0`) → **Standard Mode** (single GPU on port 8088)
 - Two values (e.g., `0,1`) → **PD Mode** (DECODE on second device:9088, PREFILL on first device:8088)
+
+**Important:** Always use `--think_mode 0` for lm-eval. Thinking mode (`--think_mode 1`) consumes the entire generation budget on reasoning tokens, leaving no room for the actual answer — making lm-eval scores unreliable.
 
 Follow the xpu-service skill procedure, then return here.
 
@@ -54,7 +56,7 @@ For PD mode, use `num_concurrent=4` and `timeout=300` to stay within KV cache ca
 
 ```
 cd $WORK_DIR
-lm-eval --model local-chat-completions \
+lm_eval --model local-chat-completions \
     --tasks gsm8k \
     --model_args "model=$MODEL_NAME,base_url=http://localhost:8088/v1/chat/completions,num_concurrent=4,max_retries=3,max_gen_toks=1024,timeout=300" \
     --apply_chat_template \
@@ -75,7 +77,7 @@ From the lm-eval output table, extract:
 - **flexible-extract** score (0.0-1.0) — lenient answer extraction
 - **strict-match** score (0.0-1.0) — exact match
 
-Expected baseline for Qwen3-8B: ~0.7 or above on flexible-extract with 10 items.
+Expected baseline for Qwen3-8B: ~0.5 or above on flexible-extract with 16 items (PD mode, 5-shot).
 
 ## Output
 - Report: mode (standard/PD), flexible-extract score, strict-match score, number of items evaluated

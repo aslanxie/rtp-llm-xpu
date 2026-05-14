@@ -22,7 +22,7 @@ Follow these steps EXACTLY in order. Do NOT run any commands outside this proced
 ### 1. Check Existing Service
 
 ```
-unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+export no_proxy="localhost,127.0.0.1"
 curl -sS --max-time 5 http://localhost:8088/health
 ```
 
@@ -41,7 +41,7 @@ Follow the xpu-service skill procedure, then return here for verification.
 
 Poll until healthy (max 180 seconds, check every 5 seconds). Use `--max-time 5` to prevent curl from blocking:
 ```
-unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+export no_proxy="localhost,127.0.0.1"
 curl -sS --max-time 5 http://localhost:8088/health
 ```
 
@@ -55,7 +55,7 @@ Expected response: `"ok"` or `{"status":"ok"}`
 ### 4. Function Test
 
 ```
-unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+export no_proxy="localhost,127.0.0.1"
 curl -sS http://localhost:8088/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{

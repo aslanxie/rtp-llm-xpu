@@ -31,7 +31,7 @@ Check `ZE_AFFINITY_MASK`:
 ```
 cd $WORK_DIR
 export PYTHONPATH=$(pwd):$PYTHONPATH
-unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+export no_proxy="localhost,127.0.0.1"
 ```
 
 ## Kill Stale Processes (before any new launch)
@@ -74,7 +74,7 @@ Launch DECODE **first**, then PREFILL. Each in a separate **async terminal**.
 ```
 cd $WORK_DIR
 export PYTHONPATH=$(pwd):$PYTHONPATH
-unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+export no_proxy="localhost,127.0.0.1"
 export MODEL_SERVICE_CONFIG='{"service_id":"local","use_local":true,"role_endpoints":[{"group":"default","prefill_endpoint":{"type":"Vipserver","address":"127.0.0.1:8088","protocol":"http","path":"/"},"decode_endpoint":{"type":"Vipserver","address":"127.0.0.1:9088","protocol":"http","path":"/"}}]}'
 ```
 

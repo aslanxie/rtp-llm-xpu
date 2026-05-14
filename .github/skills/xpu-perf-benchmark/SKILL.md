@@ -27,7 +27,7 @@ Follow these steps EXACTLY in order. Do NOT run any commands outside this proced
 ### 1. Check Service Health
 
 ```
-unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+export no_proxy="localhost,127.0.0.1"
 curl -sS --max-time 5 http://localhost:8088/health
 ```
 
@@ -48,7 +48,7 @@ It is required to capture no less than 56 lines in the output of benchmark comma
 
 ```
 cd $WORK_DIR
-unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+export no_proxy="localhost,127.0.0.1"
 
 vllm bench serve \
   --backend openai-chat \
