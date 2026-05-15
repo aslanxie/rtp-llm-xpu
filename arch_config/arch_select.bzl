@@ -4,7 +4,21 @@ load("@pip_arm_torch//:requirements.bzl", requirement_arm="requirement")
 load("@pip_gpu_cuda12_torch//:requirements.bzl", requirement_gpu_cuda12="requirement")
 load("@pip_gpu_cuda12_9_torch//:requirements.bzl", requirement_gpu_cuda12_9="requirement")
 load("@pip_gpu_rocm_torch//:requirements.bzl", requirement_gpu_rocm="requirement")
+load("@pip_xpu_torch//:requirements.bzl", requirement_xpu="requirement")
 load("@rtp_llm//bazel:defs.bzl", "copy_so")
+
+# Packages not available in XPU pip environment (CUDA/ROCm-only).
+_XPU_EXCLUDED_PACKAGES = [
+    "pynvml", "cpm_kernels", "xfastertransformer_devel",
+    "xfastertransformer_devel_icx", "decord", "onnx", "bitsandbytes",
+    "pyrsmi", "amdsmi", "fast-safetensors", "blobfile", "pyOpenSSL",
+    "pyarrow", "pyodps", "matplotlib",
+]
+
+# Packages with different names in the XPU pip environment.
+_XPU_PACKAGE_REMAP = {
+    "triton": "triton-xpu",
+}
 
 def copy_all_so():
     copy_so("@rtp_llm//:th_transformer")
@@ -13,12 +27,19 @@ def copy_all_so():
 
 def requirement(names):
     for name in names:
+        if name in _XPU_EXCLUDED_PACKAGES:
+            xpu_dep = []
+        elif name in _XPU_PACKAGE_REMAP:
+            xpu_dep = [requirement_xpu(_XPU_PACKAGE_REMAP[name])]
+        else:
+            xpu_dep = [requirement_xpu(name)]
         native.py_library(
             name = name,
             deps = select({
                 "@rtp_llm//:cuda_pre_12_9": [requirement_gpu_cuda12(name)],
                 "@rtp_llm//:using_cuda12_9_x86": [requirement_gpu_cuda12_9(name)],
                 "@rtp_llm//:using_rocm": [requirement_gpu_rocm(name)],
+                "@rtp_llm//:using_xpu": xpu_dep,
                 "@rtp_llm//:using_arm": [requirement_arm(name)],
                 "//conditions:default": [requirement_cpu(name)],
             }),
@@ -59,6 +80,7 @@ def whl_deps():
     return select({
         "@rtp_llm//:using_cuda12": ["torch==2.6.0+cu126"],
         "@rtp_llm//:using_rocm": ["pyrsmi==0.2.0", "amdsmi@https://sinian-metrics-platform.oss-cn-hangzhou.aliyuncs.com/kis%2FAMD%2Famd_smi%2Fali%2Famd_smi.tar", "aiter@https://sinian-metrics-platform.oss-cn-hangzhou.aliyuncs.com/kis/AMD/RTP/aiter-0.1.13.dev14%2Bgfa35072d0.d20260402-cp310-cp310-linux_x86_64.whl"],
+        "@rtp_llm//:using_xpu": ["torch==2.10.0+xpu"],
         "//conditions:default": ["torch==2.1.2"],
     })
 
@@ -67,6 +89,7 @@ def platform_deps():
         "@rtp_llm//:using_arm": [],
         "@rtp_llm//:using_cuda12_arm": [],
         "@rtp_llm//:using_rocm": ["pyyaml==6.0.2","decord==0.6.0"],
+        "@rtp_llm//:using_xpu": [],
         "//conditions:default": ["decord==0.6.0"],
     })
 
@@ -76,6 +99,11 @@ def torch_deps():
             "@torch_rocm//:torch_api",
             "@torch_rocm//:torch",
             "@torch_rocm//:torch_libs",
+        ],
+        "@rtp_llm//:using_xpu": [
+            "@torch_xpu//:torch_api",
+            "@torch_xpu//:torch",
+            "@torch_xpu//:torch_libs",
         ],
         "@rtp_llm//:using_arm": [
             "@torch_2.3_py310_cpu_aarch64//:torch_api",
@@ -146,6 +174,9 @@ def select_py_bindings():
         "@rtp_llm//:using_rocm": [
             "@rtp_llm//rtp_llm/models_py/bindings/rocm:rocm_bindings_register"
         ],
+        "@rtp_llm//:using_xpu": [
+            "@rtp_llm//rtp_llm/models_py/bindings/xpu:xpu_bindings_register",
+        ],
         "//conditions:default": [
             "@rtp_llm//rtp_llm/models_py/bindings:dummy_register",
         ],
@@ -158,6 +189,9 @@ def no_block_copy_link_deps():
             "@rtp_llm//rtp_llm/models_py/bindings/cuda:no_block_copy",
         ],
         "@rtp_llm//:using_rocm": [
+            "@rtp_llm//rtp_llm/models_py/bindings:no_block_copy_default",
+        ],
+        "@rtp_llm//:using_xpu": [
             "@rtp_llm//rtp_llm/models_py/bindings:no_block_copy_default",
         ],
         "//conditions:default": [
