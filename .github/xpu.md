@@ -126,6 +126,33 @@ The `xpu-verify`, `xpu-perf-benchmark`, and `xpu-accuracy-benchmark` skills all 
 /rtp-llm-xpu accuracy
 ```
 
+### Parameter Overrides
+
+Append `--key value` after a phase name to override that skill's defaults.
+Each skill lists its overridable parameters in the **Overridable Parameters** section of its SKILL.md.
+
+```
+# Run accuracy with only 8 GSM8K items (default: 64)
+/rtp-llm-xpu accuracy --limit 8
+
+# Run perf with higher concurrency
+/rtp-llm-xpu perf --max-concurrency 16
+
+# Run both perf and accuracy — accuracy uses limit=8, perf uses defaults
+/rtp-llm-xpu perf, accuracy --limit 8
+
+# Global override: enable thinking mode for both perf and accuracy
+/rtp-llm-xpu --think-mode 1 perf, accuracy
+
+# Accuracy with zero-shot (for thinking mode evaluation)
+/rtp-llm-xpu accuracy --num-fewshot 0
+```
+
+Override binding rules:
+- Flags **after** a phase keyword bind to that phase only
+- Flags **before** any phase keyword apply to all phases
+- See the orchestration prompt for full details
+
 ### Phase Order
 
 Phases always execute in this fixed order regardless of input order:
