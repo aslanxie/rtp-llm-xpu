@@ -37,7 +37,10 @@ export PYTHONPATH=$(pwd):$PYTHONPATH
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
 ```
 
-## Kill Stale Processes (before any new launch)
+## Kill Stale Processes (only when restarting)
+
+**Skip this step** if the caller passed `skip_kill=true` (i.e., no existing service is running).
+Only run when restarting a running service due to code changes or upstream merge.
 
 ```
 pkill -9 -f 'rtp_llm/start_server.py' 2>/dev/null

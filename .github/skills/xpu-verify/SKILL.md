@@ -59,7 +59,9 @@ Use the **xpu-service** skill to launch the service. It will automatically selec
 - Single value (e.g., `0`) → **Standard Mode** (single GPU on port 8088)
 - Two values (e.g., `0,1`) → **PD Mode** (DECODE on second device:9088, PREFILL on first device:8088)
 
-The xpu-service skill handles killing stale processes before launching. Follow its procedure, then return here for verification.
+Pass `skip_kill=true` to xpu-service if the launch reason is "no service running" (step 1c). Pass `skip_kill=false` (or omit) if restarting due to code changes or upstream merge (steps 1a/1b).
+
+Follow the xpu-service skill procedure, then return here for verification.
 
 ### 3. Wait for Health Check
 
