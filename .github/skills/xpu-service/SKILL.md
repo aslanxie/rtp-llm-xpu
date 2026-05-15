@@ -12,14 +12,17 @@ description: 'Launch rtp-llm-xpu service in standard or PD-disaggregated mode on
 - **MODEL_TYPE** — e.g., `qwen_3`
 - **MODEL_PATH** — checkpoint path, e.g., `/workspace/Qwen3-8B`
 - **TP_SIZE** — tensor parallelism (default `1`)
-- **ZE_AFFINITY_MASK** — `0` = single GPU, `0,1` = PD disaggregation on 2 GPUs
+- **ZE_AFFINITY_MASK** — single value (e.g., `0`) = single GPU, two comma-separated values (e.g., `2,3`) = PD disaggregation
 - **FRONTEND_SERVER_COUNT** — number of frontend servers (default `1`)
 
 ## Determine Mode
 
-Check `ZE_AFFINITY_MASK`:
-- If it contains a comma (e.g., `0,1`): **PD Mode**. First value = PREFILL device, second = DECODE device.
+Parse `ZE_AFFINITY_MASK`:
+- If it contains a comma (e.g., `2,3`): **PD Mode**. Split on comma — first value = PREFILL device, second value = DECODE device.
 - If single value (e.g., `0`): **Standard Mode**.
+
+**Important:** Use the actual device IDs from `ZE_AFFINITY_MASK`. Do NOT hardcode `0` and `1`.
+For example, if `ZE_AFFINITY_MASK=2,3`, then PREFILL runs on device `2` and DECODE on device `3`.
 
 ## When to Use
 - Starting service before accuracy / perf benchmark
@@ -31,6 +34,8 @@ Check `ZE_AFFINITY_MASK`:
 ```
 cd $WORK_DIR
 export PYTHONPATH=$(pwd):$PYTHONPATH
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+export no_proxy="localhost,127.0.0.1"
 ```
 
 ## Kill Stale Processes (before any new launch)
@@ -64,7 +69,10 @@ Health: `curl -sS --max-time 5 http://localhost:8088/health`
 
 ---
 
-## Mode B: PD Disaggregation (2 XPUs, e.g., ZE_AFFINITY_MASK=0,1)
+## Mode B: PD Disaggregation (2 XPUs, e.g., ZE_AFFINITY_MASK=2,3)
+
+Parse device IDs: split `ZE_AFFINITY_MASK` on comma → `PREFILL_DEVICE` (first), `DECODE_DEVICE` (second).
+Example: `ZE_AFFINITY_MASK=2,3` → `PREFILL_DEVICE=2`, `DECODE_DEVICE=3`.
 
 Launch DECODE **first**, then PREFILL. Each in a separate **async terminal**.
 
@@ -78,13 +86,13 @@ export no_proxy="localhost,127.0.0.1"
 export MODEL_SERVICE_CONFIG='{"service_id":"local","use_local":true,"role_endpoints":[{"group":"default","prefill_endpoint":{"type":"Vipserver","address":"127.0.0.1:8088","protocol":"http","path":"/"},"decode_endpoint":{"type":"Vipserver","address":"127.0.0.1:9088","protocol":"http","path":"/"}}]}'
 ```
 
-### B1. DECODE server (second device, port 9088) — START FIRST
+### B1. DECODE server (DECODE_DEVICE, port 9088) — START FIRST
 
 ```
 export REMOTE_RPC_SERVER_IP=localhost
 export REMOTE_SERVER_PORT=8088
 export START_PORT=9088
-ZE_AFFINITY_MASK=1 FRONTEND_SERVER_COUNT=1 \
+ZE_AFFINITY_MASK=$DECODE_DEVICE FRONTEND_SERVER_COUNT=1 \
 python3 rtp_llm/start_server.py \
   --checkpoint_path $MODEL_PATH \
   --model_type $MODEL_TYPE \
@@ -101,13 +109,13 @@ python3 rtp_llm/start_server.py \
 
 Wait until `curl -sS --max-time 5 http://localhost:9088/health` returns ok.
 
-### B2. PREFILL server (first device, port 8088) — START SECOND
+### B2. PREFILL server (PREFILL_DEVICE, port 8088) — START SECOND
 
 ```
 export REMOTE_RPC_SERVER_IP=localhost
 export REMOTE_SERVER_PORT=9088
 export START_PORT=8088
-ZE_AFFINITY_MASK=0 FRONTEND_SERVER_COUNT=1 \
+ZE_AFFINITY_MASK=$PREFILL_DEVICE FRONTEND_SERVER_COUNT=1 \
 python3 rtp_llm/start_server.py \
   --checkpoint_path $MODEL_PATH \
   --model_type $MODEL_TYPE \
@@ -188,5 +196,5 @@ curl -sS http://localhost:8088/v1/chat/completions \
 ```
 
 ## Output
-- Report: which mode launched (standard/PD), both ports healthy (if PD), smoke test PASS/FAIL
+- Report: which mode launched (standard/PD), device IDs used, both ports healthy (if PD), smoke test PASS/FAIL
 - Leave servers running for subsequent benchmark / accuracy skills

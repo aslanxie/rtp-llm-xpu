@@ -24,31 +24,25 @@ description: 'Run vllm serving benchmark on rtp-llm-xpu with ShareGPT dataset. U
 
 Follow these steps EXACTLY in order. Do NOT run any commands outside this procedure.
 
-### 1. Check Service Health
+### 1. Ensure Service Is Ready
 
-```
-export no_proxy="localhost,127.0.0.1"
-curl -sS --max-time 5 http://localhost:8088/health
-```
+Use the **xpu-verify** skill to ensure the service is running with up-to-date code. It will automatically:
+- Detect code changes or upstream merges and restart the service if needed
+- Launch the service if not running
+- Skip restart if the service is healthy and no changes detected
 
-- If response is `"ok"` or `{"status":"ok"}`: service is running. Skip to **Step 3**.
-- If connection refused or timeout: no service running. Continue to **Step 2**.
+Pass `--think_mode 0` when launching (recommended for perf benchmarks to avoid long chain-of-thought generations that skew latency metrics).
 
-### 2. Launch Service
+Follow the xpu-verify skill procedure, then return here.
 
-Use the **xpu-service** skill to launch the service with `--think_mode 0` (recommended for perf benchmarks to avoid long chain-of-thought generations that skew latency metrics). It will automatically select the correct mode based on `ZE_AFFINITY_MASK`:
-- Single value (e.g., `0`) → **Standard Mode** (single GPU on port 8088)
-- Two values (e.g., `0,1`) → **PD Mode** (DECODE on second device:9088, PREFILL on first device:8088)
-
-Follow the xpu-service skill procedure, then return here.
-
-### 3. Run Benchmark
+### 2. Run Benchmark
 
 It is required to capture no less than 56 lines in the output of benchmark command to extract key metrics.
 
 ```
 cd $WORK_DIR
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+export no_proxy="localhost,127.0.0.1"
 
 vllm bench serve \
   --backend openai-chat \
@@ -62,16 +56,16 @@ vllm bench serve \
   --max-concurrency 1 \
   --seed 42 \
   --metric-percentiles 25,50,75,90,95,99 \
-  --endpoint "/v1/chat/completions" 2>&1 | tail -60
+  --endpoint "/v1/chat/completions" 2>&1 | tee ./logs/perf_benchmark.log | tail -60
 ```
 
 For PD mode, consider `--max-concurrency 4` to test batched decode throughput.
 
-IMPORTANT: You MUST use `tail -60` (not less) to capture the full metrics output including all percentile rows.
+IMPORTANT: You MUST use `tee ./logs/perf_benchmark.log | tail -60` to both persist the full log and capture the metrics output.
 
 This takes ~15-20 minutes with 100 prompts at concurrency 1.
 
-### 4. Extract Metrics
+### 3. Extract Metrics
 
 From the benchmark output, extract:
 - **Output token throughput (tok/s)** — primary throughput metric
