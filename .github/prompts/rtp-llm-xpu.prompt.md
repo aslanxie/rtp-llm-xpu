@@ -2,7 +2,7 @@
 description: "Orchestrate rtp-llm-xpu upstream sync, build, and full verification (function, performance, accuracy) on Intel XPU"
 agent: "agent"
 tools: [execute, read, search, todo]
-argument-hint: "sync, build, verify, perf, accuracy"
+argument-hint: "sync, build, verify, perf, accuracy [--param value ...]"
 ---
 
 # Auto-Merge & Verify rtp-llm-xpu
@@ -17,9 +17,11 @@ Read [.env](../.env) to load all variables:
 
 Pass these variables to every skill invocation.
 
-## Step 1: Parse Phases
+## Step 1: Parse Phases and Overrides
 
-Parse the user's message for which phases to run. The available phases are:
+Parse the user's message for which phases to run and any parameter overrides.
+
+### Available phases
 
 | Keyword | Skill | Description |
 |---------|-------|-------------|
@@ -29,10 +31,23 @@ Parse the user's message for which phases to run. The available phases are:
 | `perf` | `xpu-perf-benchmark` | Throughput benchmark |
 | `accuracy` | `xpu-accuracy-benchmark` | GSM8K evaluation |
 
-Rules:
+### Phase rules
 - If user specifies phases (e.g., `sync, build, verify`), run ONLY those phases in order
 - If user provides no phases, run ALL phases in order
 - Always run phases in the order listed above, regardless of user input order
+
+### Parameter overrides
+
+Users can append `--key value` flags after a phase name to override skill defaults.
+Overrides bind to the **preceding phase keyword**. Global overrides (before any phase keyword) apply to all phases.
+
+Examples:
+- `accuracy --limit 8` → run accuracy with `limit=8` instead of the skill default
+- `perf --max-concurrency 8` → run perf with `max_concurrency=8`
+- `perf, accuracy --limit 8` → perf uses defaults; accuracy uses `limit=8`
+- `--think-mode 1 perf, accuracy` → both perf and accuracy use `think_mode=1`
+
+Each skill's SKILL.md defines which parameters are overridable in its **Overridable Parameters** section. Pass matched overrides when executing that skill — substitute them into the command templates.
 
 ## Execution
 

@@ -16,6 +16,16 @@ description: 'Run vllm serving benchmark on rtp-llm-xpu with ShareGPT dataset. U
 - **FRONTEND_SERVER_COUNT** — number of frontend servers
 - **DATASET_PATH** — ShareGPT dataset path
 
+## Overridable Parameters
+
+| Parameter | Flag | Default | Description |
+|-----------|------|---------|-------------|
+| `max_concurrency` | `--max-concurrency` | 1 (standard) / 4 (PD) | Max concurrent requests |
+| `num_prompts` | `--num-prompts` | 100 | Number of prompts to benchmark |
+| `request_rate` | `--request-rate` | inf | Request rate (requests/sec) |
+
+When the orchestration prompt passes overrides, substitute them into the command below.
+
 ## When to Use
 - Measuring decode throughput and latency after build or optimization
 - Comparing performance before/after code changes
@@ -51,19 +61,17 @@ vllm bench serve \
   --base-url http://localhost:8088 \
   --dataset-name sharegpt \
   --dataset-path $DATASET_PATH \
-  --num-prompts 100 \
-  --request-rate inf \
-  --max-concurrency 1 \
+  --num-prompts ${NUM_PROMPTS:-100} \
+  --request-rate ${REQUEST_RATE:-inf} \
+  --max-concurrency ${MAX_CONCURRENCY:-1} \
   --seed 42 \
   --metric-percentiles 25,50,75,90,95,99 \
   --endpoint "/v1/chat/completions" 2>&1 | tee ./logs/perf_benchmark.log | tail -60
 ```
 
-For PD mode, consider `--max-concurrency 4` to test batched decode throughput.
+For PD mode, default `max_concurrency` is 4 (unless overridden).
 
 IMPORTANT: You MUST use `tee ./logs/perf_benchmark.log | tail -60` to both persist the full log and capture the metrics output.
-
-This takes ~15-20 minutes with 100 prompts at concurrency 1.
 
 ### 3. Extract Metrics
 

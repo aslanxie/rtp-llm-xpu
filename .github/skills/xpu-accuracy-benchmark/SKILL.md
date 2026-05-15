@@ -15,6 +15,16 @@ description: 'Run GSM8K accuracy evaluation on rtp-llm-xpu using lm-eval. Use wh
 - **ZE_AFFINITY_MASK** — XPU device mask. Single value (e.g., `0`) = single GPU. Two values (e.g., `0,1`) = PD disaggregation.
 - **FRONTEND_SERVER_COUNT** — number of frontend servers
 
+## Overridable Parameters
+
+| Parameter | Flag | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | `--limit` | 64 | Number of GSM8K items to evaluate |
+| `num_fewshot` | `--num-fewshot` | 5 | Number of few-shot examples |
+| `num_concurrent` | `--num-concurrent` | 4 (PD) / 8 (standard) | API request concurrency |
+
+When the orchestration prompt passes overrides, substitute them into the command below.
+
 ## When to Use
 - Validating model accuracy after sync or code changes
 - Checking that optimizations don't degrade correctness
@@ -37,8 +47,8 @@ Follow the xpu-verify skill procedure, then return here.
 
 ### 2. Run lm-eval
 
+**Execution note:** This command takes ~20 minutes at limit=64. Run it in an async terminal and pipe output to `./logs/accuracy_benchmark.log` with `tee` so progress can be monitored without blocking.
 
-**Execution note:** This command takes ~20 minutes. Run it in an async terminal and pipe output to `./logs/accuracy_benchmark.log` with `tee` so progress can be monitored without blocking.
 Set up environment:
 ```
 export HF_ENDPOINT="https://hf-mirror.com"
@@ -51,16 +61,13 @@ For PD mode, use `num_concurrent=4` and `timeout=300` to stay within KV cache ca
 cd $WORK_DIR
 lm_eval --model local-chat-completions \
     --tasks gsm8k \
-    --model_args "model=$MODEL_NAME,base_url=http://localhost:8088/v1/chat/completions,num_concurrent=4,max_retries=3,max_length=4096,max_gen_toks=2048,timeout=300" \
+    --model_args "model=$MODEL_NAME,base_url=http://localhost:8088/v1/chat/completions,num_concurrent=${NUM_CONCURRENT:-4},max_retries=3,max_length=4096,max_gen_toks=2048,timeout=300" \
     --apply_chat_template \
-    --num_fewshot 5 \
-    --batch_size 1 \
-    --limit 64 2>&1 | tee ./logs/accuracy_benchmark.log
+    --num_fewshot ${NUM_FEWSHOT:-5} \
+    --limit ${LIMIT:-64} 2>&1 | tee ./logs/accuracy_benchmark.log
 ```
 
-For standard mode, `num_concurrent` can be higher (e.g., 8).
-
-This runs 64 GSM8K items with 5-shot prompting using greedy decoding.
+For standard mode, `num_concurrent` default is 8.
 
 **Note:** Do NOT use `--gen_kwargs` with `max_new_tokens` — the `local-chat-completions` backend does not convert it to `max_tokens`. Use `max_gen_toks` in `--model_args` instead.
 
