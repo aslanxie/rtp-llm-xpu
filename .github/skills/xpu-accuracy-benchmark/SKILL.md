@@ -52,17 +52,17 @@ export HF_ENDPOINT="https://hf-mirror.com"
 export no_proxy="localhost,127.0.0.1"
 ```
 
-For PD mode, use `num_concurrent=4` and `timeout=300` to stay within KV cache capacity:
+For PD mode, use `num_concurrent=4` and `timeout=600` to stay within KV cache capacity:
 
 ```
 cd $WORK_DIR
 lm_eval --model local-chat-completions \
     --tasks gsm8k \
-    --model_args "model=$MODEL_NAME,base_url=http://localhost:8088/v1/chat/completions,num_concurrent=4,max_retries=3,max_gen_toks=1024,timeout=300" \
+    --model_args "model=$MODEL_NAME,base_url=http://localhost:8088/v1/chat/completions,num_concurrent=4,max_retries=3,max_length=4096,max_gen_toks=2048,timeout=300" \
     --apply_chat_template \
     --num_fewshot 5 \
     --batch_size 1 \
-    --limit 10
+    --limit 64
 ```
 
 For standard mode, `num_concurrent` can be higher (e.g., 8).

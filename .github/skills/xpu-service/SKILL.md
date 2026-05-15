@@ -31,7 +31,6 @@ Check `ZE_AFFINITY_MASK`:
 ```
 cd $WORK_DIR
 export PYTHONPATH=$(pwd):$PYTHONPATH
-export no_proxy="localhost,127.0.0.1"
 ```
 
 ## Kill Stale Processes (before any new launch)
@@ -58,7 +57,7 @@ python3 rtp_llm/start_server.py \
   --seq_size_per_block 64 \
   --concurrency_limit 16 \
   --warm_up 0 \
-  2>&1 | tee /tmp/standard.log
+  2>&1 | tee ./logs/standard.log
 ```
 
 Health: `curl -sS --max-time 5 http://localhost:8088/health`
@@ -74,6 +73,7 @@ Launch DECODE **first**, then PREFILL. Each in a separate **async terminal**.
 ```
 cd $WORK_DIR
 export PYTHONPATH=$(pwd):$PYTHONPATH
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
 export no_proxy="localhost,127.0.0.1"
 export MODEL_SERVICE_CONFIG='{"service_id":"local","use_local":true,"role_endpoints":[{"group":"default","prefill_endpoint":{"type":"Vipserver","address":"127.0.0.1:8088","protocol":"http","path":"/"},"decode_endpoint":{"type":"Vipserver","address":"127.0.0.1:9088","protocol":"http","path":"/"}}]}'
 ```
@@ -96,7 +96,7 @@ python3 rtp_llm/start_server.py \
   --max_context_batch_size 4 \
   --concurrency_with_block true \
   --warm_up 0 \
-  2>&1 | tee /tmp/decode.log
+  2>&1 | tee ./logs/decode.log
 ```
 
 Wait until `curl -sS --max-time 5 http://localhost:9088/health` returns ok.
@@ -118,7 +118,7 @@ python3 rtp_llm/start_server.py \
   --concurrency_limit 64 \
   --concurrency_with_block true \
   --warm_up 0 \
-  2>&1 | tee /tmp/prefill.log
+  2>&1 | tee ./logs/prefill.log
 ```
 
 Client always talks to port **8088** (PREFILL endpoint).

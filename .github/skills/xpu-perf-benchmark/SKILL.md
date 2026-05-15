@@ -48,7 +48,7 @@ It is required to capture no less than 56 lines in the output of benchmark comma
 
 ```
 cd $WORK_DIR
-export no_proxy="localhost,127.0.0.1"
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
 
 vllm bench serve \
   --backend openai-chat \
@@ -61,7 +61,7 @@ vllm bench serve \
   --request-rate inf \
   --max-concurrency 1 \
   --seed 42 \
-  --metric-percentiles 10,20,30,40,50,60,70,80,90,95,99 \
+  --metric-percentiles 25,50,75,90,95,99 \
   --endpoint "/v1/chat/completions" 2>&1 | tail -60
 ```
 
