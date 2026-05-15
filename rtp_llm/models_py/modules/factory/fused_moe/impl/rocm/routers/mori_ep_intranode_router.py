@@ -67,18 +67,13 @@ class MoriEpIntranodeRouter(FusedMoeDataRouter):
         Non-local experts are mapped to local index 0 (safe fallback) so the
         fused kernel computes valid output that is zeroed by weight=0.
         """
+        from rtp_llm.models_py.triton_kernels.moe.remap_local_ids_kernel import (
+            remap_to_local_ids,
+        )
+
         local_start = self.ep_rank * self.expert_num_per_rank
         local_end = local_start + self.expert_num_per_rank
-        non_local_mask = (dispatch_ids < local_start) | (dispatch_ids >= local_end)
-
-        local_ids = dispatch_ids.clone()
-        local_ids[non_local_mask] = local_start
-        local_ids = local_ids - local_start
-
-        local_weights = dispatch_weights.to(torch.float32).clone()
-        local_weights[non_local_mask] = 0.0
-
-        return local_ids, local_weights
+        return remap_to_local_ids(dispatch_ids, dispatch_weights, local_start, local_end)
 
     def prepare(
         self,
