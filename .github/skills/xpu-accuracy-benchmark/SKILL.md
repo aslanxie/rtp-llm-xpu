@@ -37,6 +37,8 @@ Follow the xpu-verify skill procedure, then return here.
 
 ### 2. Run lm-eval
 
+
+**Execution note:** This command takes ~20 minutes. Run it in an async terminal and pipe output to `./logs/accuracy_benchmark.log` with `tee` so progress can be monitored without blocking.
 Set up environment:
 ```
 export HF_ENDPOINT="https://hf-mirror.com"
@@ -53,7 +55,7 @@ lm_eval --model local-chat-completions \
     --apply_chat_template \
     --num_fewshot 5 \
     --batch_size 1 \
-    --limit 64
+    --limit 64 2>&1 | tee ./logs/accuracy_benchmark.log
 ```
 
 For standard mode, `num_concurrent` can be higher (e.g., 8).

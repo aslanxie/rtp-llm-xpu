@@ -35,7 +35,6 @@ For example, if `ZE_AFFINITY_MASK=2,3`, then PREFILL runs on device `2` and DECO
 cd $WORK_DIR
 export PYTHONPATH=$(pwd):$PYTHONPATH
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
-export no_proxy="localhost,127.0.0.1"
 ```
 
 ## Kill Stale Processes (before any new launch)
