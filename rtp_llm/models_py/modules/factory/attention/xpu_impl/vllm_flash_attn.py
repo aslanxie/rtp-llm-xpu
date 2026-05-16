@@ -208,18 +208,41 @@ class XpuVllmPrefillImpl(FMHAImplBase):
         self.fmha_params = None
         # PD disaggregation: register KV blocks with cache_store after writing
         self.write_cache_store_impl = common.create_write_cache_store_impl(attn_inputs)
-        logger.warning("[XPU PD] XpuVllmPrefillImpl init is_prefill=%s cache_store_inputs=%s write_op=%s", attn_inputs.is_prefill, bool(attn_inputs.cache_store_inputs), self.write_cache_store_impl is not None)
+        logger.debug("[XPU PD] XpuVllmPrefillImpl init is_prefill=%s cache_store_inputs=%s write_op=%s", attn_inputs.is_prefill, bool(attn_inputs.cache_store_inputs), self.write_cache_store_impl is not None)
 
     @staticmethod
     def support(attn_configs, attn_inputs):
-        return attn_inputs.is_prefill
+        if not attn_inputs.is_prefill:
+            return False
+        # Prefix-cache (chunked prefill / reuse) is not yet implemented here:
+        # the path does not load previously written K/V blocks into attention,
+        # so any request with prefix_lengths > 0 would produce wrong results.
+        # Decline the impl when prefix tokens are present so the framework can
+        # route the request to a backend that supports it.
+        pl = getattr(attn_inputs, 'prefix_lengths', None)
+        if pl is not None and pl.numel() > 0:
+            try:
+                if int(pl.sum()) > 0:
+                    return False
+            except Exception:
+                return False
+        return True
 
     def forward(self, qkv, kv_cache=None, layer_idx=0):
         flash_attn_varlen = _get_flash_attn_varlen()
         total_tokens = qkv.shape[0]
+
+        input_lengths = self.attn_inputs.input_lengths
+        input_lengths_cpu = None
+        max_pos_hint = None
+        if input_lengths is not None and input_lengths.numel() > 0:
+            input_lengths_cpu = input_lengths if input_lengths.is_cpu else input_lengths.cpu()
+            max_pos_hint = int(input_lengths_cpu.max())
+
         q, k, v = _split_qkv_and_rope(
             qkv, self.attn_inputs, self.num_heads, self.num_kv_heads,
             self.head_dim, self.rope_config, self.need_rope,
+            max_pos_hint=max_pos_hint,
         )
 
         # Write K,V to paged LayerKVCache for future decode steps
@@ -228,31 +251,31 @@ class XpuVllmPrefillImpl(FMHAImplBase):
             if block_ids_all is None:
                 block_ids_all = self.attn_inputs.kv_cache_block_id_host
             if block_ids_all is not None and block_ids_all.numel() > 0:
-                input_lengths = self.attn_inputs.input_lengths
-                if input_lengths is not None and input_lengths.numel() > 1:
+                block_ids_cpu = block_ids_all if block_ids_all.is_cpu else block_ids_all.cpu()
+                if input_lengths_cpu is not None and input_lengths_cpu.numel() > 1:
                     # Batched prefill: write each request separately
-                    num_reqs = input_lengths.numel()
-                    offsets = torch.cat([torch.zeros(1, dtype=torch.int32), input_lengths.cpu().cumsum(0)])
+                    num_reqs = input_lengths_cpu.numel()
+                    offsets = torch.cat([torch.zeros(1, dtype=torch.int32), input_lengths_cpu.cumsum(0)])
                     # block_ids_all may be [num_reqs, blocks_per_req] or [1, total_blocks]
                     # Reshape to [num_reqs, -1] if needed
-                    if block_ids_all.dim() == 1:
-                        blocks_per_req = block_ids_all.numel() // num_reqs
-                        bids_2d = block_ids_all.reshape(num_reqs, blocks_per_req)
-                    elif block_ids_all.shape[0] == num_reqs:
-                        bids_2d = block_ids_all
+                    if block_ids_cpu.dim() == 1:
+                        blocks_per_req = block_ids_cpu.numel() // num_reqs
+                        bids_2d = block_ids_cpu.reshape(num_reqs, blocks_per_req)
+                    elif block_ids_cpu.shape[0] == num_reqs:
+                        bids_2d = block_ids_cpu
                     else:
-                        blocks_per_req = block_ids_all.numel() // num_reqs
-                        bids_2d = block_ids_all.reshape(num_reqs, blocks_per_req)
+                        blocks_per_req = block_ids_cpu.numel() // num_reqs
+                        bids_2d = block_ids_cpu.reshape(num_reqs, blocks_per_req)
                     for req_idx in range(num_reqs):
                         start = int(offsets[req_idx])
                         end = int(offsets[req_idx + 1])
-                        bids = bids_2d[req_idx].cpu()
+                        bids = bids_2d[req_idx]
                         _write_to_paged_cache(
                             k[start:end], v[start:end], kv_cache, bids, 0,
                             self.num_kv_heads, self.head_dim,
                         )
                 else:
-                    bids = block_ids_all[0].cpu()
+                    bids = block_ids_cpu[0]
                     _write_to_paged_cache(k, v, kv_cache, bids, 0,
                                           self.num_kv_heads, self.head_dim)
 
@@ -262,7 +285,7 @@ class XpuVllmPrefillImpl(FMHAImplBase):
                 ai = self.attn_inputs
                 def _shape(t):
                     return None if t is None else (tuple(t.shape) if hasattr(t,"shape") else "?")
-                logger.warning(
+                logger.debug(
                     "[XPU PD] write_cache_store layer=%s in_len=%s prefix_len=%s blkid_host=%s",
                     layer_idx,
                     _shape(ai.input_lengths),
@@ -273,13 +296,16 @@ class XpuVllmPrefillImpl(FMHAImplBase):
                 self.write_cache_store_impl, self.attn_inputs, kv_cache
             )
 
-        cu_seqlens = self.attn_inputs.cu_seqlens
-        if cu_seqlens is None or cu_seqlens.numel() <= 1:
-            cu_seqlens = torch.tensor([0, total_tokens], dtype=torch.int32, device=qkv.device)
-        else:
-            cu_seqlens = cu_seqlens.to(device=qkv.device, dtype=torch.int32)
-        max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max().item())
+        cu_seqlens_cpu = self.attn_inputs.cu_seqlens
+        if cu_seqlens_cpu is None or cu_seqlens_cpu.numel() <= 1:
+            cu_seqlens_cpu = torch.tensor([0, total_tokens], dtype=torch.int32)
 
+        if input_lengths_cpu is not None and input_lengths_cpu.numel() > 0:
+            max_seqlen = int(input_lengths_cpu.max())
+        else:
+            max_seqlen = int((cu_seqlens_cpu[1:] - cu_seqlens_cpu[:-1]).max())
+
+        cu_seqlens = cu_seqlens_cpu.to(device=qkv.device, dtype=torch.int32)
         output = flash_attn_varlen(
             q.contiguous(), k.contiguous(), v.contiguous(),
             cu_seqlens_q=cu_seqlens, cu_seqlens_k=cu_seqlens,
@@ -369,7 +395,7 @@ class XpuVllmDecodeImpl(FMHAImplBase):
             if _pid_cache is not None and _pid_cache[0] == _pid_key:
                 self.attn_inputs.position_ids = _pid_cache[1]
             else:
-                _pid = seq_lens_cpu.to(dtype=torch.long, device=qkv.device)
+                _pid = seq_lens_cpu.to(dtype=torch.long, device=qkv.device, non_blocking=True)
                 cls._pos_ids_cache = (_pid_key, _pid)
                 self.attn_inputs.position_ids = _pid
 
@@ -427,7 +453,7 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         if _fb_cache is not None and _fb_cache[0] == _fb_key:
             flat_bids = _fb_cache[1]
         else:
-            flat_bids = needed_bids.reshape(-1).long().to(cache.device)
+            flat_bids = needed_bids.reshape(-1).long().to(cache.device, non_blocking=True)
             cls._flat_bids_cache = (_fb_key, flat_bids)
         nb = flat_bids.numel()
         H = self.num_kv_heads
@@ -472,7 +498,7 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         if _sk_cache is not None and _sk_cache[0] == _sk_key:
             seqused_k = _sk_cache[1]
         else:
-            seqused_k = kv_lens.to(dtype=torch.int32, device=qkv.device)
+            seqused_k = kv_lens.to(dtype=torch.int32, device=qkv.device, non_blocking=True)
             cls._seqused_k_cache = (_sk_key, seqused_k)
         cu_q = _get_arange(num_requests + 1, torch.int32, qkv.device)
 
