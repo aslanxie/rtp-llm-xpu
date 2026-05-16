@@ -83,12 +83,22 @@ struct KVCache {
                                                               (int64_t)kernel_seq_size_per_block,
                                                               (int64_t)(kv_lora_rank + rope_head_dim)});
                 } else if (num_kv_heads > 0 && head_dim > 0) {
+#ifdef USING_XPU
+                    // XPU flash layout: [kernel_block_num, 2, kernel_seq_size_per_block, num_kv_heads, head_dim]
+                    // Allows paged flash attention with gather but no transpose.
+                    layer_cache.kv_cache_base = base.reshape({kernel_block_num,
+                                                              2,
+                                                              (int64_t)kernel_seq_size_per_block,
+                                                              (int64_t)num_kv_heads,
+                                                              (int64_t)head_dim});
+#else
                     // MHA layout: [kernel_block_num, 2, num_kv_heads, kernel_seq_size_per_block, head_dim]
                     layer_cache.kv_cache_base = base.reshape({kernel_block_num,
                                                               2,
                                                               (int64_t)num_kv_heads,
                                                               (int64_t)kernel_seq_size_per_block,
                                                               (int64_t)head_dim});
+#endif
                 } else {
                     layer_cache.kv_cache_base = base;
                 }

@@ -146,7 +146,7 @@ def _write_to_paged_cache(k, v, kv_cache, block_ids_cpu, start_pos, num_kv_heads
     and writes via advanced indexing instead of a Python while-loop.
     """
     tpb = kv_cache.seq_size_per_block
-    cache = kv_cache.kv_cache_base  # [num_blocks, 2, kv_heads, tpb, head_dim]
+    cache = kv_cache.kv_cache_base  # XPU flash layout: [num_blocks, 2, tpb, kv_heads, head_dim]
     bids = block_ids_cpu.reshape(-1)
     N = k.shape[0]
     if N == 0:
@@ -164,9 +164,9 @@ def _write_to_paged_cache(k, v, kv_cache, block_ids_cpu, start_pos, num_kv_heads
         v = v[:valid_mask.sum()]
     block_indices = bids[blk_slots].long().to(cache.device)
     offsets = offsets.to(cache.device)
-    # k shape: [N, kv_heads, dim] -> write to cache[block_indices, 0, :, offsets, :]
-    cache[block_indices, 0, :, offsets, :] = k
-    cache[block_indices, 1, :, offsets, :] = v
+    # k shape: [N, kv_heads, dim] -> write to cache[block_indices, 0, offsets, :, :]
+    cache[block_indices, 0, offsets, :, :] = k
+    cache[block_indices, 1, offsets, :, :] = v
 
 
 def _read_from_paged_cache(kv_cache, block_ids_cpu, total_len, num_kv_heads, head_dim):
@@ -176,7 +176,7 @@ def _read_from_paged_cache(kv_cache, block_ids_cpu, total_len, num_kv_heads, hea
     and gathers via advanced indexing instead of a Python while-loop.
     """
     tpb = kv_cache.seq_size_per_block
-    cache = kv_cache.kv_cache_base  # [num_blocks, 2, kv_heads, tpb, head_dim]
+    cache = kv_cache.kv_cache_base  # XPU flash layout: [num_blocks, 2, tpb, kv_heads, head_dim]
     bids = block_ids_cpu.reshape(-1)
     if total_len == 0:
         return cache.new_empty(0, num_kv_heads, head_dim), cache.new_empty(0, num_kv_heads, head_dim)
@@ -186,9 +186,9 @@ def _read_from_paged_cache(kv_cache, block_ids_cpu, total_len, num_kv_heads, hea
     offsets = positions % tpb
     block_indices = bids[blk_slots].long().to(cache.device)
     offsets_dev = offsets.to(cache.device)
-    # Gather: cache[block_indices, 0/1, :, offsets, :] -> [N, kv_heads, dim]
-    k = cache[block_indices, 0, :, offsets_dev, :].contiguous()
-    v = cache[block_indices, 1, :, offsets_dev, :].contiguous()
+    # Gather: cache[block_indices, 0/1, offsets, :, :] -> [N, kv_heads, dim]
+    k = cache[block_indices, 0, offsets_dev, :, :].contiguous()
+    v = cache[block_indices, 1, offsets_dev, :, :].contiguous()
     return k, v
 
 
@@ -416,37 +416,51 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         else:
             raise RuntimeError("No block IDs available for paged decode")
 
-        # --- Write new K,V tokens: scalar indexing, no tensor transfers ---
+        # --- Vectorized K,V writes for new decode tokens ---
+        # Cache layout: [num_blocks, 2, tpb, kv_heads, head_dim] (XPU flash layout)
         kv_lens = seq_lens_cpu + 1  # CPU tensor
-        for i in range(num_requests):
-            write_pos = int(seq_lens_cpu[i])
-            blk_slot = write_pos // tpb
-            offset = write_pos % tpb
-            bid = int(bids_2d_cpu[i, blk_slot])
-            cache[bid, 0, :, offset, :] = k_new[i]
-            cache[bid, 1, :, offset, :] = v_new[i]
-
-        # --- Build block_table directly — no unique, no remap ---
         n_blocks_per_req = (kv_lens + tpb - 1) // tpb  # CPU tensor
         max_blocks_needed = int(n_blocks_per_req.max())
-
-        # Memory-optimized gather: view-transpose (free) then advanced-index
-        # (single copy). Avoids the large 'gathered' intermediate that caused
-        # OOM with batched decode.
-        # cache: [total_blocks, 2, kv_heads, tpb, head_dim]
-        # view:  [total_blocks, tpb, kv_heads, head_dim]  (transpose, no alloc)
-        # gather:[N_blocks, tpb, kv_heads, head_dim]      (single contiguous copy)
         needed_bids = bids_2d_cpu[:, :max_blocks_needed]
-        # Hoist flat_bids construction to step-level: identical across all
-        # layers in a single decode step, so cache by (CPU buffer data_ptr,
-        # shape, device). Eliminates 35 redundant CPU->XPU copies per step
-        # for a 36-layer model.
+
+        # Hoist write-indices CPU→GPU across layers (identical for all 36 layers)
+        _wk = (
+            seq_lens_cpu.data_ptr(),
+            seq_lens_cpu.numel(),
+            int(seq_lens_cpu[0]) if seq_lens_cpu.numel() > 0 else 0,
+            bids_2d_cpu.data_ptr(),
+            cache.device,
+        )
+        _wc = getattr(cls, "_write_idx_cache", None)
+        if _wc is not None and _wc[0] == _wk:
+            bid_dev, off_dev = _wc[1], _wc[2]
+        else:
+            write_positions = seq_lens_cpu.long()
+            blk_slots_cpu = write_positions // tpb
+            offsets_cpu = (write_positions % tpb).long()
+            bid_indices = torch.tensor(
+                [int(bids_2d_cpu[i, int(blk_slots_cpu[i])]) for i in range(num_requests)],
+                dtype=torch.long,
+            )
+            bid_dev = bid_indices.to(cache.device, non_blocking=True)
+            off_dev = offsets_cpu.to(cache.device, non_blocking=True)
+            cls._write_idx_cache = (_wk, bid_dev, off_dev)
+
+        # Two kernel launches total (vs 2 * num_requests in the per-loop write).
+        cache[bid_dev, 0, off_dev, :, :] = k_new
+        cache[bid_dev, 1, off_dev, :, :] = v_new
+
+        # --- Gather active blocks into contiguous K/V buffers ---
+        # cache[:, 0] / cache[:, 1] are non-contiguous slices (stride 2 along
+        # block axis). flash_attn requires contiguous K and V, so we gather
+        # the active blocks via index_select. With the flash layout
+        # [num_blocks, 2, tpb, H, D] the gather output is already
+        # [Nb, tpb, H, D] -- no transpose needed (the legacy MHA layout
+        # required an extra transpose copy).
         _fb_key = (
             needed_bids.data_ptr(),
             needed_bids.shape[0],
             needed_bids.shape[1],
-            seq_lens_cpu.data_ptr(),
-            int(seq_lens_cpu[0]) if seq_lens_cpu.numel() > 0 else 0,
             cache.device,
         )
         _fb_cache = getattr(cls, "_flat_bids_cache", None)
@@ -459,28 +473,21 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         H = self.num_kv_heads
         D = self.head_dim
         need_size = nb * tpb * H * D
-        # Reuse persistent class-level scratch buffers per device to eliminate
-        # per-call XPU allocations across N layers x M tokens. Four buffers:
-        # k_gath/v_gath are filled by index_select(out=) in [Nb,H,T,D] layout;
-        # k_out/v_out hold the transposed [Nb,T,H,D] tensor that flash_attn
-        # paged-attention expects. Buffers grow monotonically with workload.
+        # Persistent scratch buffers grow monotonically to avoid per-call
+        # XPU allocations across N layers x M steps.
         scratch = getattr(cls, "_kv_scratch", None)
         if scratch is None or scratch[0].device != cache.device or \
                 scratch[0].dtype != cache.dtype or \
                 scratch[0].numel() < need_size:
             mk = lambda: torch.empty(need_size, dtype=cache.dtype, device=cache.device)
-            cls._kv_scratch = (mk(), mk(), mk(), mk())
+            cls._kv_scratch = (mk(), mk())
             scratch = cls._kv_scratch
-        k_gath = scratch[0][:need_size].view(nb, H, tpb, D)
-        v_gath = scratch[1][:need_size].view(nb, H, tpb, D)
-        k_cache = scratch[2][:need_size].view(nb, tpb, H, D)
-        v_cache = scratch[3][:need_size].view(nb, tpb, H, D)
-        torch.index_select(cache[:, 0], 0, flat_bids, out=k_gath)
-        torch.index_select(cache[:, 1], 0, flat_bids, out=v_gath)
-        k_cache.copy_(k_gath.transpose(1, 2))
-        v_cache.copy_(v_gath.transpose(1, 2))
+        k_cache = scratch[0][:need_size].view(nb, tpb, H, D)
+        v_cache = scratch[1][:need_size].view(nb, tpb, H, D)
+        torch.index_select(cache[:, 0], 0, flat_bids, out=k_cache)
+        torch.index_select(cache[:, 1], 0, flat_bids, out=v_cache)
 
-        # Sequential block_table: blocks gathered in order
+        # Sequential block_table: blocks gathered in order.
         block_table = _get_arange(
             flat_bids.numel(), torch.int32, qkv.device,
         ).reshape(num_requests, max_blocks_needed)
