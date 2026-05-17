@@ -961,6 +961,7 @@ class CustomChatRenderer:
             else generate_config.num_beams
         )
         nums_output = last_num_beams if last_num_beams != 1 else nums_output
+        self._min_new_tokens = generate_config.min_new_tokens
         status_list = await self._create_status_list(nums_output, request)
         index = 0
         think_status_list = [
@@ -1523,7 +1524,7 @@ class CustomChatRenderer:
         return chat_response.model_dump_json(exclude_none=True)
 
     def _check_finish_reason(
-        self, token_ids: List[int], input_token_length: int, max_new_tokens: int = -1
+        self, token_ids: List[int], input_token_length: int, max_new_tokens: int = -1,
     ) -> Optional[FinisheReason]:
         stop_word_ids_list_all = (
             self.get_all_extra_stop_word_ids_list() + self.stop_words_id_list
@@ -1532,6 +1533,9 @@ class CustomChatRenderer:
             return FinisheReason.length
         if len(token_ids) + input_token_length >= self.max_seq_len:
             return FinisheReason.length
+        min_new_tokens = getattr(self, '_min_new_tokens', 0)
+        if min_new_tokens > 0 and len(token_ids) < min_new_tokens:
+            return None
         if token_ids and token_ids[-1] == self.eos_token_id:
             return FinisheReason.stop
         for stop_word_ids in stop_word_ids_list_all:

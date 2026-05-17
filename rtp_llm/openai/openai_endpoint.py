@@ -302,6 +302,12 @@ class OpenaiEndpoint(object):
         aux_info = None
         extra_outputs = None
         async for response in choice_generator:
+            # Capture usage/aux_info even from usage-only chunks (choices=[])
+            usage = response.usage or usage
+            aux_info = response.aux_info or aux_info
+            extra_outputs = response.extra_outputs or extra_outputs
+            if not response.choices:
+                continue
             if len(response.choices) != len(all_choices):
                 if all_choices == []:
                     all_choices = [
@@ -365,9 +371,6 @@ class OpenaiEndpoint(object):
                             ].logprobs.content
                     else:
                         all_choices[i].logprobs = response.choices[i].logprobs
-            usage = response.usage or usage
-            aux_info = response.aux_info or aux_info
-            extra_outputs = response.extra_outputs or extra_outputs
 
         if usage == None:
             logging.warning(f"No usage returned from stream response. use empty value.")
@@ -417,14 +420,43 @@ class OpenaiEndpoint(object):
                         for output_ids in response.extra_outputs.output_ids
                     ]
 
-                yield ChatCompletionStreamResponse(
-                    choices=response.choices,
-                    usage=response.usage,
-                    aux_info=response.aux_info,
-                    debug_info=debug_info if not debug_info_responded else output,
-                    extra_outputs=response.extra_outputs,
-                )
-                debug_info_responded = True
+                # OpenAI spec (when stream_options.include_usage=true): the
+                # trailing chunk carrying `usage` must have `choices=[]`.
+                # Otherwise OpenAI-compatible benchmark clients (e.g. vllm
+                # bench serve) parse the chunk via `if choices: ... elif
+                # usage: ...` and silently drop the usage payload, then fall
+                # back to retokenizing the streamed text to count output
+                # tokens. That produces non-deterministic counts across
+                # runs/commits even when the server actually generated an
+                # identical number of tokens. Split the final chunk in two so
+                # the usage is delivered in its own choices-empty chunk.
+                if (response.usage is not None
+                        and response.choices
+                        and any(c.finish_reason for c in response.choices)):
+                    yield ChatCompletionStreamResponse(
+                        choices=response.choices,
+                        usage=None,
+                        aux_info=response.aux_info,
+                        debug_info=debug_info if not debug_info_responded else output,
+                        extra_outputs=response.extra_outputs,
+                    )
+                    debug_info_responded = True
+                    yield ChatCompletionStreamResponse(
+                        choices=[],
+                        usage=response.usage,
+                        aux_info=None,
+                        debug_info=None,
+                        extra_outputs=None,
+                    )
+                else:
+                    yield ChatCompletionStreamResponse(
+                        choices=response.choices,
+                        usage=response.usage,
+                        aux_info=response.aux_info,
+                        debug_info=debug_info if not debug_info_responded else output,
+                        extra_outputs=response.extra_outputs,
+                    )
+                    debug_info_responded = True
 
         complete_response_collect_func = partial(
             OpenaiEndpoint._collect_complete_response,
