@@ -351,6 +351,20 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
         }
     }
 
+    // 2.5 Temperature==0 fast path (greedy argmax)
+    // When temperature is 0, the intent is greedy decoding.
+    // Skip the expensive softmax→multinomial path and use argmax directly.
+    if (std::all_of(params.temperature.data_ptr<float>(),
+                    params.temperature.data_ptr<float>() + batch_size,
+                    [](float t) { return t == 0.0f; })
+        && !params.output_all_probs.has_value()) {
+        auto samples_t = transposed_tokens.slice(0, step, step + 1).squeeze(0);
+        auto selected  = torch::argmax(params.logits, -1, false);
+        samples_t.copy_(selected);
+        params.token_ids.copy_(transposed_tokens.transpose(0, 1).contiguous());
+        return GreedyOutput{};
+    }
+
     // 3. Top-k=1 fast path (greedy argmax)
     auto top_k_ptr = reinterpret_cast<uint32_t*>(params.top_k.data_ptr<int32_t>());
     if (std::all_of(top_k_ptr, top_k_ptr + batch_size, [](uint32_t t) { return t == 1; })
