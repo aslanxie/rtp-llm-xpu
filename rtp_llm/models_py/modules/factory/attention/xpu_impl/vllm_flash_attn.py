@@ -6,6 +6,7 @@ to handle variable-length sequences in a single kernel call.
 """
 
 import logging
+from collections import OrderedDict
 from typing import Dict, Optional, Tuple
 
 import torch
@@ -44,7 +45,7 @@ def _get_arange(size, dtype, device):
 
 # ── RoPE ────────────────────────────────────────────────────────────────────
 
-_COS_SIN_CACHE: Dict = {}
+_COS_SIN_CACHE: OrderedDict = OrderedDict()
 _COS_SIN_CACHE_MAX_SIZE = 32
 
 
@@ -53,6 +54,7 @@ def _get_cos_sin_cache(rope_config, head_dim, max_pos, dtype, device):
     base = getattr(rope_config, 'base', 10000.0) or 10000.0
     key = (base, rotary_dim, max_pos, dtype, str(device))
     if key in _COS_SIN_CACHE:
+        _COS_SIN_CACHE.move_to_end(key)
         return _COS_SIN_CACHE[key]
     # Evict oldest entries if cache is full
     if len(_COS_SIN_CACHE) >= _COS_SIN_CACHE_MAX_SIZE:
@@ -96,8 +98,10 @@ def _apply_rope(q, k, positions, rope_config, head_dim, num_heads, num_kv_heads,
         from rtp_llm.models_py.modules.base.xpu.vllm_xpu_ops import rotary_embedding as vllm_rope
         vllm_rope(positions, q, k, head_dim, cos_sin_cache, is_neox)
         return q, k
-    except Exception:
-        pass
+    except Exception as e:
+        if not getattr(_apply_rope, '_rope_fallback_warned', False):
+            logger.warning('vllm RoPE kernel failed, using Python fallback (perf degraded): %s', e)
+            _apply_rope._rope_fallback_warned = True
     num_tokens = q.shape[0]
     cos_sin = cos_sin_cache[positions.long()]
     half = cos_sin.shape[-1] // 2
@@ -139,11 +143,78 @@ def _split_qkv_and_rope(qkv, attn_inputs, num_heads, num_kv_heads, head_dim, rop
 
 # ── Paged KV cache helpers ──────────────────────────────────────────────
 
+# Module-level LRU cache for prefill write indices. The same (bids, start_pos,
+# N, tpb) recurs across all layers within one forward pass; precomputing
+# device tensors once eliminates (num_layers-1) CPU->XPU transfers per request.
+_PREFILL_WRITE_IDX_CACHE: OrderedDict = OrderedDict()
+_PREFILL_WRITE_IDX_CACHE_MAX = 64
+
+
+def _get_prefill_write_indices(bids_cpu, start_pos, N, tpb, device):
+    """Return (block_indices_dev, offsets_dev, n_valid). Cached by
+    (bids.data_ptr(), start_pos, N, tpb, device).
+    """
+    key = (bids_cpu.data_ptr(), int(start_pos), int(N), int(tpb), str(device))
+    cached = _PREFILL_WRITE_IDX_CACHE.get(key)
+    if cached is not None:
+        _PREFILL_WRITE_IDX_CACHE.move_to_end(key)
+        return cached
+    abs_positions = torch.arange(start_pos, start_pos + N, dtype=torch.long)
+    blk_slots = abs_positions // tpb
+    offsets_cpu = abs_positions % tpb
+    valid_mask = blk_slots < bids_cpu.numel()
+    if not valid_mask.all():
+        blk_slots = blk_slots[valid_mask]
+        offsets_cpu = offsets_cpu[valid_mask]
+        n_valid = int(valid_mask.sum())
+    else:
+        n_valid = int(N)
+    block_indices_cpu = bids_cpu[blk_slots].long()
+    block_indices_dev = block_indices_cpu.to(device, non_blocking=True)
+    offsets_dev = offsets_cpu.to(device, non_blocking=True)
+    if len(_PREFILL_WRITE_IDX_CACHE) >= _PREFILL_WRITE_IDX_CACHE_MAX:
+        _PREFILL_WRITE_IDX_CACHE.popitem(last=False)
+    val = (block_indices_dev, offsets_dev, n_valid)
+    _PREFILL_WRITE_IDX_CACHE[key] = val
+    return val
+
+
+# Threshold above which scatter_ on a flat view beats index_put_; measured via
+# tools/scatter_prototype.py. Tune per device if needed.
+_SCATTER_N_THRESHOLD = 256
+
+
+def _flat_write_kv(cache, block_indices, offsets, k, v, tpb, H, D):
+    """Scatter K,V into cache[B, 2, S, H, D] via flat-view index_put_/scatter_.
+
+    Faster than `cache[bi, 0, off, :, :] = k` because it (a) avoids the cost
+    of advanced-indexing two leading dims simultaneously and (b) lets the
+    XPU runtime emit a single linear scatter kernel. PD-safe: storage layout
+    unchanged.
+    """
+    N = k.shape[0]
+    cache_flat = cache.view(-1, H, D)  # [num_blocks*2*tpb, H, D]
+    # Linear index: bi * (2*tpb) + role*tpb + off
+    base = block_indices * (2 * tpb) + offsets
+    flat_idx_k = base                # role=0
+    flat_idx_v = base + tpb          # role=1
+    if N >= _SCATTER_N_THRESHOLD:
+        # scatter_ saturates bandwidth at large N; broadcast indices to [N,H,D]
+        idx_k = flat_idx_k.view(-1, 1, 1).expand(-1, H, D)
+        idx_v = flat_idx_v.view(-1, 1, 1).expand(-1, H, D)
+        cache_flat.scatter_(0, idx_k, k)
+        cache_flat.scatter_(0, idx_v, v)
+    else:
+        cache_flat.index_put_((flat_idx_k,), k)
+        cache_flat.index_put_((flat_idx_v,), v)
+
+
 def _write_to_paged_cache(k, v, kv_cache, block_ids_cpu, start_pos, num_kv_heads, head_dim):
     """Write k,v [N, kv_heads, dim] to paged LayerKVCache.
 
-    Vectorized: computes block/offset mapping for all N tokens at once
-    and writes via advanced indexing instead of a Python while-loop.
+    Reuses cached device indices when the same (bids, start_pos, N) recurs
+    across layers in one forward pass, then dispatches to an adaptive
+    flat-view scatter (index_put_ at small N, scatter_ at large N).
     """
     tpb = kv_cache.seq_size_per_block
     cache = kv_cache.kv_cache_base  # XPU flash layout: [num_blocks, 2, tpb, kv_heads, head_dim]
@@ -151,22 +222,14 @@ def _write_to_paged_cache(k, v, kv_cache, block_ids_cpu, start_pos, num_kv_heads
     N = k.shape[0]
     if N == 0:
         return
-    # Compute block slot and offset for each token
-    abs_positions = torch.arange(start_pos, start_pos + N, dtype=torch.long)
-    blk_slots = abs_positions // tpb
-    offsets = abs_positions % tpb
-    # Clamp to available block IDs
-    valid_mask = blk_slots < bids.numel()
-    if not valid_mask.all():
-        blk_slots = blk_slots[valid_mask]
-        offsets = offsets[valid_mask]
-        k = k[:valid_mask.sum()]
-        v = v[:valid_mask.sum()]
-    block_indices = bids[blk_slots].long().to(cache.device)
-    offsets = offsets.to(cache.device)
-    # k shape: [N, kv_heads, dim] -> write to cache[block_indices, 0, offsets, :, :]
-    cache[block_indices, 0, offsets, :, :] = k
-    cache[block_indices, 1, offsets, :, :] = v
+    block_indices, offsets, n_valid = _get_prefill_write_indices(
+        bids, start_pos, N, tpb, cache.device,
+    )
+    if n_valid != N:
+        k = k[:n_valid]
+        v = v[:n_valid]
+        N = n_valid
+    _flat_write_kv(cache, block_indices, offsets, k, v, tpb, num_kv_heads, head_dim)
 
 
 def _read_from_paged_cache(kv_cache, block_ids_cpu, total_len, num_kv_heads, head_dim):
