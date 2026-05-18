@@ -302,6 +302,12 @@ class OpenaiEndpoint(object):
         aux_info = None
         extra_outputs = None
         async for response in choice_generator:
+            # Capture usage/aux_info even from usage-only chunks (choices=[])
+            usage = response.usage or usage
+            aux_info = response.aux_info or aux_info
+            extra_outputs = response.extra_outputs or extra_outputs
+            if not response.choices:
+                continue
             if len(response.choices) != len(all_choices):
                 if all_choices == []:
                     all_choices = [
@@ -365,9 +371,6 @@ class OpenaiEndpoint(object):
                             ].logprobs.content
                     else:
                         all_choices[i].logprobs = response.choices[i].logprobs
-            usage = response.usage or usage
-            aux_info = response.aux_info or aux_info
-            extra_outputs = response.extra_outputs or extra_outputs
 
         if usage == None:
             logging.warning(f"No usage returned from stream response. use empty value.")
@@ -417,14 +420,45 @@ class OpenaiEndpoint(object):
                         for output_ids in response.extra_outputs.output_ids
                     ]
 
-                yield ChatCompletionStreamResponse(
-                    choices=response.choices,
-                    usage=response.usage,
-                    aux_info=response.aux_info,
-                    debug_info=debug_info if not debug_info_responded else output,
-                    extra_outputs=response.extra_outputs,
-                )
-                debug_info_responded = True
+                # OpenAI Chat Completions streaming protocol: when a chunk
+                # carries `usage`, that chunk must have `choices=[]`. Real
+                # OpenAI servers emit the trailing usage payload in a
+                # standalone chunk after the chunk that contained
+                # `finish_reason`. Bundling them in a single chunk leads
+                # spec-compliant clients to drop the `usage` field (they
+                # branch on `if choices: ... elif usage: ...`) and instead
+                # retokenize streamed text to estimate output length, which
+                # is non-deterministic. Emit the final usage in its own
+                # choices-empty chunk.
+                if (
+                    response.usage is not None
+                    and response.choices
+                    and any(c.finish_reason for c in response.choices)
+                ):
+                    yield ChatCompletionStreamResponse(
+                        choices=response.choices,
+                        usage=None,
+                        aux_info=response.aux_info,
+                        debug_info=debug_info if not debug_info_responded else output,
+                        extra_outputs=response.extra_outputs,
+                    )
+                    debug_info_responded = True
+                    yield ChatCompletionStreamResponse(
+                        choices=[],
+                        usage=response.usage,
+                        aux_info=None,
+                        debug_info=None,
+                        extra_outputs=None,
+                    )
+                else:
+                    yield ChatCompletionStreamResponse(
+                        choices=response.choices,
+                        usage=response.usage,
+                        aux_info=response.aux_info,
+                        debug_info=debug_info if not debug_info_responded else output,
+                        extra_outputs=response.extra_outputs,
+                    )
+                    debug_info_responded = True
 
         complete_response_collect_func = partial(
             OpenaiEndpoint._collect_complete_response,
