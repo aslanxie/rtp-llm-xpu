@@ -3,6 +3,7 @@ import functools
 import json
 import logging
 import os
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, AsyncGenerator, List, Optional, Tuple, Union
@@ -45,6 +46,10 @@ from rtp_llm.utils.word_util import (
     is_truncated,
     truncate_response_with_stop_words,
 )
+
+# Per-request floor on generated tokens, threaded through asyncio Tasks via
+# ContextVar so concurrent requests cannot clobber each other's value.
+_MIN_NEW_TOKENS_CV: ContextVar[int] = ContextVar("_min_new_tokens", default=0)
 
 
 def _get_think_config(generate_env_config):
@@ -950,6 +955,10 @@ class CustomChatRenderer:
         request: ChatCompletionRequest,
         generate_config: GenerateConfig,
     ) -> AsyncGenerator[StreamResponseObject, None]:
+        # Bind min_new_tokens for this request's asyncio Task scope. The value
+        # is read by _check_finish_reason; using a ContextVar avoids touching
+        # the _update_single_status signature (which subclasses override).
+        _MIN_NEW_TOKENS_CV.set(int(generate_config.min_new_tokens or 0))
         stop_word_slice_list = get_stop_word_slices(generate_config.stop_words_str)
         nums_output = request.n if request.n is not None else 1
         # FIXME(zhangjianning.zjn): for variable width beam search,
@@ -961,7 +970,6 @@ class CustomChatRenderer:
             else generate_config.num_beams
         )
         nums_output = last_num_beams if last_num_beams != 1 else nums_output
-        self._min_new_tokens = generate_config.min_new_tokens
         status_list = await self._create_status_list(nums_output, request)
         index = 0
         think_status_list = [
@@ -1524,7 +1532,10 @@ class CustomChatRenderer:
         return chat_response.model_dump_json(exclude_none=True)
 
     def _check_finish_reason(
-        self, token_ids: List[int], input_token_length: int, max_new_tokens: int = -1,
+        self,
+        token_ids: List[int],
+        input_token_length: int,
+        max_new_tokens: int = -1,
     ) -> Optional[FinisheReason]:
         stop_word_ids_list_all = (
             self.get_all_extra_stop_word_ids_list() + self.stop_words_id_list
@@ -1533,7 +1544,12 @@ class CustomChatRenderer:
             return FinisheReason.length
         if len(token_ids) + input_token_length >= self.max_seq_len:
             return FinisheReason.length
-        min_new_tokens = getattr(self, '_min_new_tokens', 0)
+        # min_new_tokens is a hard floor: do not terminate on EOS or stop-words
+        # before the requested minimum is generated. The length-based checks
+        # above still take precedence (max_new_tokens / max_seq_len). The value
+        # is read from a ContextVar set per-request in render_response_stream,
+        # which keeps the subclass _update_single_status signatures unchanged.
+        min_new_tokens = _MIN_NEW_TOKENS_CV.get()
         if min_new_tokens > 0 and len(token_ids) < min_new_tokens:
             return None
         if token_ids and token_ids[-1] == self.eos_token_id:

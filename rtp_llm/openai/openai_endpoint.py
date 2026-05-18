@@ -420,19 +420,21 @@ class OpenaiEndpoint(object):
                         for output_ids in response.extra_outputs.output_ids
                     ]
 
-                # OpenAI spec (when stream_options.include_usage=true): the
-                # trailing chunk carrying `usage` must have `choices=[]`.
-                # Otherwise OpenAI-compatible benchmark clients (e.g. vllm
-                # bench serve) parse the chunk via `if choices: ... elif
-                # usage: ...` and silently drop the usage payload, then fall
-                # back to retokenizing the streamed text to count output
-                # tokens. That produces non-deterministic counts across
-                # runs/commits even when the server actually generated an
-                # identical number of tokens. Split the final chunk in two so
-                # the usage is delivered in its own choices-empty chunk.
-                if (response.usage is not None
-                        and response.choices
-                        and any(c.finish_reason for c in response.choices)):
+                # OpenAI Chat Completions streaming protocol: when a chunk
+                # carries `usage`, that chunk must have `choices=[]`. Real
+                # OpenAI servers emit the trailing usage payload in a
+                # standalone chunk after the chunk that contained
+                # `finish_reason`. Bundling them in a single chunk leads
+                # spec-compliant clients to drop the `usage` field (they
+                # branch on `if choices: ... elif usage: ...`) and instead
+                # retokenize streamed text to estimate output length, which
+                # is non-deterministic. Emit the final usage in its own
+                # choices-empty chunk.
+                if (
+                    response.usage is not None
+                    and response.choices
+                    and any(c.finish_reason for c in response.choices)
+                ):
                     yield ChatCompletionStreamResponse(
                         choices=response.choices,
                         usage=None,
