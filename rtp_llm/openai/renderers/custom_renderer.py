@@ -1523,6 +1523,9 @@ class CustomChatRenderer:
         if usage == None:
             logging.warning(f"No usage returned from stream response. use empty value.")
             usage = UsageInfo(prompt_tokens=0, total_tokens=0, completion_tokens=0)
+        for choice in all_choices:
+            if choice.message.content is None:
+                choice.message.content = ""
         chat_response = ChatCompletionResponse(
             choices=all_choices,
             usage=usage,

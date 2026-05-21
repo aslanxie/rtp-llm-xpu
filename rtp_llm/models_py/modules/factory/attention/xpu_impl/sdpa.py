@@ -17,6 +17,7 @@ import torch.nn.functional as F
 from rtp_llm.models_py.modules.factory.attention.fmha_impl_base import FMHAImplBase
 from rtp_llm.ops import AttentionConfigs, ParallelismConfig
 from rtp_llm.ops.compute_ops import LayerKVCache, PyAttentionInputs
+from rtp_llm.models_py.modules.factory.attention import common
 from rtp_llm.models_py.modules.factory.attention.xpu_impl.vllm_flash_attn import (
     _apply_rope, _need_rope, _split_qkv_and_rope, _write_to_paged_cache,
     _get_flash_attn_varlen,
@@ -37,6 +38,9 @@ class XpuSdpaPrefillImpl(FMHAImplBase):
         self.head_dim = attn_configs.size_per_head
         self.rope_config = attn_configs.rope_config
         self.need_rope = _need_rope(attn_configs)
+        # PD disaggregation: notify cache_store after writing KV so the decode
+        # role can fetch the prefill output via P2P RPC.  Same as VllmPrefill.
+        self.write_cache_store_impl = common.create_write_cache_store_impl(attn_inputs)
 
     @staticmethod
     def support(attn_configs, attn_inputs):
@@ -49,27 +53,40 @@ class XpuSdpaPrefillImpl(FMHAImplBase):
             self.head_dim, self.rope_config, self.need_rope,
         )
 
-        # Write K,V to paged cache for future decode steps
+        # Write K,V to paged cache for future decode steps.
+        # IMPORTANT: when prefix-cache is hit (prefix_lengths[i] > 0), the new
+        # tokens must be written at offset = prefix_lengths[i], not 0, or they
+        # will clobber the cached prefix blocks at the wrong positions.
         if kv_cache is not None:
             block_ids_all = self.attn_inputs.kv_cache_block_id_device
             if block_ids_all is None:
                 block_ids_all = self.attn_inputs.kv_cache_block_id_host
             if block_ids_all is not None and block_ids_all.numel() > 0:
                 input_lengths = self.attn_inputs.input_lengths
+                prefix_lengths = getattr(self.attn_inputs, 'prefix_lengths', None)
+                pl_cpu = prefix_lengths.cpu() if (prefix_lengths is not None and prefix_lengths.numel() > 0) else None
                 if input_lengths is not None and input_lengths.numel() > 1:
-                    offsets = torch.cat([torch.zeros(1, dtype=torch.int32), input_lengths.cpu().cumsum(0)])
-                    for req_idx in range(input_lengths.numel()):
+                    in_cpu = input_lengths.cpu()
+                    offsets = torch.cat([torch.zeros(1, dtype=torch.int32), in_cpu.cumsum(0)])
+                    for req_idx in range(in_cpu.numel()):
                         start = int(offsets[req_idx])
                         end = int(offsets[req_idx + 1])
                         bids = block_ids_all[req_idx].cpu()
+                        start_pos = int(pl_cpu[req_idx]) if pl_cpu is not None and pl_cpu.numel() > req_idx else 0
                         _write_to_paged_cache(
-                            k[start:end], v[start:end], kv_cache, bids, 0,
+                            k[start:end], v[start:end], kv_cache, bids, start_pos,
                             self.num_kv_heads, self.head_dim,
                         )
                 else:
                     bids = block_ids_all[0].cpu()
-                    _write_to_paged_cache(k, v, kv_cache, bids, 0,
+                    start_pos = int(pl_cpu[0]) if pl_cpu is not None and pl_cpu.numel() > 0 else 0
+                    _write_to_paged_cache(k, v, kv_cache, bids, start_pos,
                                           self.num_kv_heads, self.head_dim)
+
+            # PD disaggregation: notify cache_store the KV blocks are ready.
+            common.apply_write_cache_store(
+                self.write_cache_store_impl, self.attn_inputs, kv_cache
+            )
 
         # Use flash_attn_varlen for batched variable-length attention
         flash_attn_varlen = _get_flash_attn_varlen()

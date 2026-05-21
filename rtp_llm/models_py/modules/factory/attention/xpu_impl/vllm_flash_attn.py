@@ -114,6 +114,33 @@ def _apply_rope(q, k, positions, rope_config, head_dim, num_heads, num_kv_heads,
     return q_r.reshape(num_tokens, -1), k_r.reshape(num_tokens, -1)
 
 
+def _build_prefill_positions(attn_inputs, total_tokens, device):
+    """Build per-token position IDs for a prefill batch.
+
+    For batched prefill, concatenates ``arange(prefix_i, prefix_i + input_i)``
+    so each sequence's RoPE positions start from its own prefix offset, not
+    from a global ``arange(total_tokens)`` (which would alias positions across
+    requests and produce wrong K).  Handles prefix-cache prefill
+    (``prefix_lengths > 0``) by offsetting each request's position range.
+    """
+    input_lengths = getattr(attn_inputs, 'input_lengths', None)
+    if input_lengths is None or input_lengths.numel() == 0:
+        return torch.arange(total_tokens, dtype=torch.long, device=device)
+    input_lengths_cpu = input_lengths if input_lengths.is_cpu else input_lengths.cpu()
+    prefix_lengths = getattr(attn_inputs, 'prefix_lengths', None)
+    if prefix_lengths is not None and not prefix_lengths.is_cpu:
+        prefix_lengths = prefix_lengths.cpu()
+    has_prefix = prefix_lengths is not None and prefix_lengths.numel() > 0
+    # Fast path: single request, no prefix offset -> simple arange.
+    if input_lengths_cpu.numel() == 1 and not (has_prefix and int(prefix_lengths[0]) > 0):
+        return torch.arange(total_tokens, dtype=torch.long, device=device)
+    parts = []
+    for i, slen in enumerate(input_lengths_cpu.tolist()):
+        offset = int(prefix_lengths[i]) if has_prefix and prefix_lengths.numel() > i else 0
+        parts.append(torch.arange(offset, offset + int(slen), dtype=torch.long))
+    return torch.cat(parts).to(device=device, non_blocking=True)
+
+
 def _split_qkv_and_rope(qkv, attn_inputs, num_heads, num_kv_heads, head_dim, rope_config, need_rope, max_pos_hint=None):
     """Split QKV tensor and apply RoPE. Returns q, k, v as [tokens, heads, dim]."""
     total_tokens = qkv.shape[0]
@@ -123,7 +150,10 @@ def _split_qkv_and_rope(qkv, attn_inputs, num_heads, num_kv_heads, head_dim, rop
     if need_rope:
         positions = attn_inputs.position_ids
         if positions is None:
-            positions = torch.arange(total_tokens, dtype=torch.long, device=qkv.device)
+            positions = _build_prefill_positions(attn_inputs, total_tokens, qkv.device)
+            # Cache on attn_inputs so subsequent layers in the same forward
+            # pass reuse the same tensor (avoids N CPU->XPU transfers).
+            attn_inputs.position_ids = positions
         q_flat = qkv[:, :q_size].contiguous()
         k_flat = qkv[:, q_size:q_size + kv_size].contiguous()
         q_flat, k_flat = _apply_rope(
@@ -301,6 +331,10 @@ class XpuVllmPrefillImpl(FMHAImplBase):
         if input_lengths is not None and input_lengths.numel() > 0:
             input_lengths_cpu = input_lengths if input_lengths.is_cpu else input_lengths.cpu()
             max_pos_hint = int(input_lengths_cpu.max())
+
+        # Per-sequence position IDs (with prefix offsets) are derived inside
+        # _split_qkv_and_rope via _build_prefill_positions when position_ids
+        # is None.  Single source of truth shared with XpuSdpaPrefillImpl.
 
         q, k, v = _split_qkv_and_rope(
             qkv, self.attn_inputs, self.num_heads, self.num_kv_heads,
