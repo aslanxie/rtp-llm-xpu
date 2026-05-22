@@ -86,8 +86,23 @@ void prepareInPlace(CKAttn& params, const torch_ext::PyAttentionInputs& attn_inp
     updateKvCacheOffset(params, attn_inputs.kv_cache_kernel_block_id_device);
 }
 
+static void rejectMropeWithoutPositionIds(const RopeConfig& rope_config, const char* where) {
+    // ROCm prefill/decode dispatch always passes position_ids=nullptr (combo_position_ids
+    // is not plumbed through this path yet). Mrope needs real per-axis position ids — without
+    // them the kernel silently uses position_id=-1, producing wrong RoPE positions.
+    if (rope_config.style == RopeStyle::Mrope) {
+        throw std::runtime_error(std::string(where)
+                                 + ": RopeStyle::Mrope requires combo_position_ids, but ROCm "
+                                   "fused RoPE+KV-cache path does not plumb position_ids yet. "
+                                   "Run this model on the CUDA path or extend this op to accept "
+                                   "position_ids before enabling Mrope.");
+    }
+}
+
 FusedRopeKVCachePrefillOpBase::FusedRopeKVCachePrefillOpBase(const AttentionConfigs& attn_configs):
-    attn_configs_(attn_configs) {}
+    attn_configs_(attn_configs) {
+    rejectMropeWithoutPositionIds(attn_configs.rope_config, "FusedRopeKVCachePrefillOp");
+}
 
 FusedRopeKVCachePrefillOpAsm::FusedRopeKVCachePrefillOpAsm(const AttentionConfigs& attn_configs):
     FusedRopeKVCachePrefillOpBase(attn_configs) {}
@@ -119,6 +134,7 @@ CKAttnPtr FusedRopeKVCachePrefillOpBase::prepare(torch_ext::PyAttentionInputs at
     attn_params->input_lengths  = attn_inputs.input_lengths;
     attn_params->max_seq_len    = attn_inputs.input_lengths.max().item<int32_t>();
     attn_params->padding_offset = attn_inputs.padding_offset;
+
     // 处理 prefix_lengths：确保在 CUDA 上且连续
     if (has_prefix) {
         torch::Tensor prefix_lengths = attn_inputs.prefix_lengths;
@@ -156,7 +172,13 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> FusedRopeKVCachePrefillO
     const bool paged_fp8 = use_paged_fmha && attn_configs_.kv_cache_dtype == KvCacheDataType::FP8;
     const auto q_opts = torch::TensorOptions(qkv.dtype()).device(qkv.device());
 
-    torch::Tensor q_output = torch::zeros({q_output_token_num, local_head_num, size_per_head}, q_opts);
+    // pad_query=false: q_output is packed [token_num, heads, dim] and the kernel writes
+    // every cell — skip the zero-fill. pad_query=true: padded slots between sequences
+    // are not written by the kernel, so they must be zero-initialized for downstream
+    // FMHA correctness.
+    torch::Tensor q_output = (use_paged_fmha && pad_query)
+        ? torch::zeros({q_output_token_num, local_head_num, size_per_head}, q_opts)
+        : torch::empty({q_output_token_num, local_head_num, size_per_head}, q_opts);
     torch::Tensor q_fp8_buf;
     if (paged_fp8) {
         q_fp8_buf = torch::empty({q_output_token_num, local_head_num, size_per_head},
@@ -276,7 +298,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> FusedRopeKVCachePrefillO
                                          qkv.data_ptr(),
                                          paged_fp8 ? q_fp8_buf.data_ptr() :
                                                      (use_fmha_fp8 && qkv_buf_fp8.defined() ? qkv_buf_fp8.data_ptr() : nullptr),
-                                         nullptr,
+                                         nullptr,  // position_ids: V1 falls back to context_rope's
+                                                   // built-in prefix-aware seq_idx; V3 self-computes
                                          nullptr,
                                          params->padding_offset.data_ptr<int>(),
                                          params->cu_seqlens.data_ptr<int>(),
@@ -308,7 +331,9 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> FusedRopeKVCachePrefillO
 }
 
 FusedRopeKVCacheDecodeOpBase::FusedRopeKVCacheDecodeOpBase(const AttentionConfigs& attn_configs):
-    attn_configs_(attn_configs) {}
+    attn_configs_(attn_configs) {
+    rejectMropeWithoutPositionIds(attn_configs.rope_config, "FusedRopeKVCacheDecodeOp");
+}
 
 FusedRopeKVCacheDecodeOpAsm::FusedRopeKVCacheDecodeOpAsm(const AttentionConfigs& attn_configs):
     FusedRopeKVCacheDecodeOpBase(attn_configs) {}
