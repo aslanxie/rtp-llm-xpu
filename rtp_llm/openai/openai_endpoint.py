@@ -315,7 +315,7 @@ class OpenaiEndpoint(object):
                             index=i,
                             message=ChatMessage(
                                 role=choice.delta.role or RoleEnum.assistant,
-                                content=choice.delta.content or None,
+                                content=choice.delta.content if choice.delta.content is not None else "",
                                 function_call=choice.delta.function_call or None,
                                 tool_calls=choice.delta.tool_calls or None,
                             ),
@@ -331,9 +331,9 @@ class OpenaiEndpoint(object):
                     )
             else:
                 for i in range(len(all_choices)):
-                    if all_choices[i].message.content == None:
+                    if all_choices[i].message.content is None:
                         all_choices[i].message.content = (
-                            response.choices[i].delta.content or None
+                            response.choices[i].delta.content or ""
                         )
                     else:
                         all_choices[i].message.content += (
@@ -388,6 +388,10 @@ class OpenaiEndpoint(object):
                     for output_ids in extra_outputs.output_ids
                 ]
 
+
+        for choice in all_choices:
+            if choice.message.content is None:
+                choice.message.content = ""
         return ChatCompletionResponse(
             choices=all_choices,
             usage=usage,

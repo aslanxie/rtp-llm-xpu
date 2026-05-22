@@ -1471,7 +1471,7 @@ class CustomChatRenderer:
                                 index=i,
                                 message=ChatMessage(
                                     role=choice.delta.role or RoleEnum.assistant,
-                                    content=content or None,
+                                    content=content if content is not None else "",
                                     reasoning_content=reasoning_content or None,
                                     function_call=choice.delta.function_call or None,
                                 ),
@@ -1486,9 +1486,9 @@ class CustomChatRenderer:
                     )
             else:
                 for i in range(len(all_choices)):
-                    if all_choices[i].message.content == None:
+                    if all_choices[i].message.content is None:
                         all_choices[i].message.content = (
-                            response.choices[i].delta.content or None
+                            response.choices[i].delta.content or ""
                         )
                     else:
                         all_choices[i].message.content += (
