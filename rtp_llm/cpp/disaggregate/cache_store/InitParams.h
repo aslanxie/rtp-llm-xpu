@@ -42,6 +42,11 @@ public:
     uint32_t messager_io_thread_count     = 4;
     uint32_t messager_worker_thread_count = 32;
 
+    // If true, loadBuffers() combines per-layer RPCs into a single combined
+    // load regardless of RDMA mode.  Useful on TCP-only backends to reduce
+    // control-plane overhead.
+    bool force_combine_load = false;
+
     kmonitor::MetricsReporterPtr metrics_reporter;
 
     // for test

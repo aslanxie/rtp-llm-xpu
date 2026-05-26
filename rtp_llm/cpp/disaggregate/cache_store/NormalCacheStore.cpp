@@ -233,7 +233,12 @@ NormalCacheStore::loadBuffers(const std::vector<std::shared_ptr<RequestBlockBuff
         return nullptr;
     }
 
-    auto load_context = std::make_shared<LoadContext>(shared_from_this(), memory_util_->isRdmaMode());
+    // Combine per-layer RPCs into one combined load when either RDMA mode is
+    // active (its native behavior) or when force_combine_load is explicitly
+    // requested (e.g. TCP-only backends that benefit from amortizing
+    // control-plane overhead).
+    const bool combine_load = memory_util_->isRdmaMode() || params_.force_combine_load;
+    auto load_context = std::make_shared<LoadContext>(shared_from_this(), combine_load);
     load_context->load(
         request_block_buffers, ip, port, rdma_port, timeout_ms, check_cancel_func, partition_count, partition_id);
     return load_context;

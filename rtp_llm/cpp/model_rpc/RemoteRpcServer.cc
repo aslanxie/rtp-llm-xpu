@@ -78,6 +78,7 @@ void RemoteRpcServer::initCacheStore(const EngineInitParams&                init
     params.rdma_worker_thread_count     = init_params.cache_store_config.rdma_worker_thread_count;
     params.messager_io_thread_count     = init_params.cache_store_config.messager_io_thread_count;
     params.messager_worker_thread_count = init_params.cache_store_config.messager_worker_thread_count;
+    params.force_combine_load           = init_params.cache_store_config.force_combine_load;
     params.metrics_reporter             = metrics_reporter_;
     RTP_LLM_LOG_INFO("cache store listen port is [%ld], rdma listen port is [%ld] rdma_mode is [%d]",
                      params.listen_port,

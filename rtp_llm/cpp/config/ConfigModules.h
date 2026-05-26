@@ -321,6 +321,12 @@ struct CacheStoreConfig {
     int     cache_store_tcp_anet_rpc_thread_num          = 3;
     int     cache_store_tcp_anet_rpc_queue_num           = 100;
 
+    // When true, NormalCacheStore::loadBuffers combines per-layer RPCs into a
+    // single combined load (matching the RDMA path) instead of issuing one RPC
+    // per layer.  Reduces TCP control-plane overhead on backends where RDMA is
+    // unavailable; independent of memory_util_->isRdmaMode().
+    bool    force_combine_load                           = false;
+
     std::string to_string() const;
 };
 

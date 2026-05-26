@@ -178,3 +178,11 @@ def init_cache_store_group_args(parser, cache_store_config):
         default=100,
         help="P2P TCP 控制面 ANetRPCServer queueNum。",
     )
+    cache_store_group.add_argument(
+        "--cache_store_force_combine_load",
+        env_name="CACHE_STORE_FORCE_COMBINE_LOAD",
+        bind_to=(cache_store_config, "force_combine_load"),
+        type=str2bool,
+        default=False,
+        help="Force NormalCacheStore::loadBuffers to combine per-layer RPCs into a single load (matching RDMA path behavior). Reduces TCP control-plane overhead on backends without RDMA.",
+    )
