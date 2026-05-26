@@ -302,7 +302,11 @@ class OpenaiEndpoint(object):
         aux_info = None
         extra_outputs = None
         async for response in choice_generator:
-            # Capture usage/aux_info even from usage-only chunks (choices=[])
+            # Per the Chat Completions streaming protocol, a chunk that
+            # carries `usage` arrives with `choices=[]` after the chunk that
+            # contained `finish_reason`. Capture usage/aux_info/extra_outputs
+            # first so usage-only chunks are accounted for, then skip the
+            # per-choice merge below.
             usage = response.usage or usage
             aux_info = response.aux_info or aux_info
             extra_outputs = response.extra_outputs or extra_outputs
