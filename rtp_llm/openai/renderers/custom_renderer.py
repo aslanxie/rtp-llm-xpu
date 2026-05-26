@@ -52,6 +52,13 @@ from rtp_llm.utils.word_util import (
 _MIN_NEW_TOKENS_CV: ContextVar[int] = ContextVar("_min_new_tokens", default=0)
 
 
+# Per-request floor on generated tokens, threaded through asyncio Tasks via
+# ContextVar so concurrent requests cannot clobber each other's value. Read
+# by CustomChatRenderer._check_finish_reason; set per request at the top of
+# render_response_stream. Default 0 preserves prior behavior.
+_MIN_NEW_TOKENS_CV: ContextVar[int] = ContextVar("_min_new_tokens", default=0)
+
+
 def _get_think_config(generate_env_config):
     """Get thinking configuration from generate_env_config.
 
