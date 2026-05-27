@@ -10,11 +10,26 @@ on PATH or via `PYTHON_BIN_PATH`.
 """
 
 def _torch_xpu_configure_impl(repository_ctx):
+    # Check if XPU torch is actually available; if not, create a dummy repo
+    # so CUDA/ROCm builds don't fail.
     python_bin = repository_ctx.os.environ.get("PYTHON_BIN_PATH", "")
     if not python_bin:
         python_bin = repository_ctx.which("python3")
         if not python_bin:
-            fail("Could not find python3 on PATH. Set PYTHON_BIN_PATH.")
+            # No python3 — create dummy and return
+            repository_ctx.file("BUILD.bazel", "# dummy torch_xpu repo (no python3 found)\n")
+            return
+
+    # Check if torch.xpu is available in this Python
+    check = repository_ctx.execute([
+        python_bin, "-c", "import torch; assert hasattr(torch, 'xpu')",
+    ])
+    if check.return_code != 0:
+        # torch.xpu not available — create dummy BUILD and return
+        repository_ctx.symlink(repository_ctx.attr.build_file, "BUILD.bazel")
+        # Create minimal torch directory stubs so select() targets resolve
+        repository_ctx.file("torch/lib/.empty", "")
+        return
 
     # Auto-detect site-packages from the Python interpreter
     result = repository_ctx.execute([

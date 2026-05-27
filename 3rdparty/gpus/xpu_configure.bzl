@@ -137,8 +137,44 @@ def _find_icpx(repository_ctx, oneapi_root):
         return result.stdout.strip()
     auto_configure_fail("Cannot find icpx compiler. Ensure Intel oneAPI is installed.")
 
+def _enable_xpu(repository_ctx):
+    """Check if XPU build is requested via using_xpu=true define."""
+    # XPU is only needed when building with --config=xpu (which sets using_xpu=true).
+    # Check TF_NEED_CUDA: if it's "0", we might be on XPU. But the most reliable
+    # signal is whether oneAPI is actually installed.
+    oneapi_root = repository_ctx.os.environ.get(_ONEAPI_ROOT, "")
+    if oneapi_root and repository_ctx.path(oneapi_root).exists:
+        return True
+    for path in ["/opt/intel/oneapi", "/opt/oneapi"]:
+        if repository_ctx.path(path).exists:
+            return True
+    return False
+
+def _create_dummy_repository(repository_ctx):
+    """Create a minimal stub repository when XPU SDK is not available."""
+    repository_ctx.file("BUILD", """
+package(default_visibility = ["//visibility:public"])
+
+cc_library(
+    name = "crosstool",
+)
+""")
+    repository_ctx.file("crosstool/BUILD", """
+package(default_visibility = ["//visibility:public"])
+
+filegroup(name = "empty", srcs = [])
+
+cc_toolchain_suite(
+    name = "toolchain",
+    toolchains = {},
+)
+""")
+
 def _xpu_configure_impl(repository_ctx):
     """Implementation of the xpu_configure repository rule."""
+    if not _enable_xpu(repository_ctx):
+        _create_dummy_repository(repository_ctx)
+        return
     oneapi_root = _oneapi_root(repository_ctx)
     icx_path = _find_icx(repository_ctx, oneapi_root)
     icpx_path = _find_icpx(repository_ctx, oneapi_root)

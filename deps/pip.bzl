@@ -69,7 +69,7 @@ def pip_deps():
     pip_parse(
         name = "pip_xpu_torch",
         requirements_lock = "@rtp_deps//:requirements_lock_xpu.txt",
-        python_interpreter = "/opt/venv/bin/python3",
+        python_interpreter = "/opt/conda310/bin/python3",
         extra_pip_args = PIP_EXTRA_ARGS + ["--extra-index-url=https://download.pytorch.org/whl/xpu"],
         timeout = 3600,
     )
