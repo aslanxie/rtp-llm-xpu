@@ -427,5 +427,77 @@ class TestIncludeUsageMultiFinishNoDuplicate(unittest.TestCase):
             self.assertIsNone(c.usage)
 
 
+class TestIncludeUsageStaggeredMultiChoiceFinish(unittest.TestCase):
+    """Multi-choice (n>=2) regression: when choices finish on different
+    chunks, the trailing usage chunk must be emitted exactly once after
+    the entire stream is drained, with the FINAL usage value. The emit
+    must not be triggered mid-stream by a single choice's finish_reason
+    while other choices are still generating content."""
+
+    def test_staggered_finish_emits_usage_after_all_choices_done(self):
+        usage_at_first_finish = UsageInfo(
+            prompt_tokens=4, completion_tokens=5, total_tokens=9
+        )
+        usage_final = UsageInfo(
+            prompt_tokens=4, completion_tokens=12, total_tokens=16
+        )
+        items = [
+            # Both choices producing content.
+            StreamResponseObject(
+                choices=[
+                    _make_choice(index=0, content="a0"),
+                    _make_choice(index=1, content="b0"),
+                ]
+            ),
+            # Choice 0 finishes; choice 1 still generating. Backend
+            # tags this chunk with running usage covering tokens so far.
+            StreamResponseObject(
+                choices=[
+                    _make_choice(
+                        index=0, content="", finish_reason=FinisheReason.stop
+                    ),
+                    _make_choice(index=1, content="b1"),
+                ],
+                usage=usage_at_first_finish,
+            ),
+            # Choice 1 continues for more chunks while choice 0 is done.
+            StreamResponseObject(
+                choices=[_make_choice(index=1, content="b2")]
+            ),
+            # Choice 1 finishes; backend carries the final usage.
+            StreamResponseObject(
+                choices=[
+                    _make_choice(
+                        index=1, content="", finish_reason=FinisheReason.stop
+                    )
+                ],
+                usage=usage_final,
+            ),
+        ]
+        gen = OpenaiEndpoint._complete_stream_response(
+            _gen_from(items),
+            debug_info=None,
+            tokenizer=None,
+            include_usage=True,
+        )
+        out = asyncio.run(_drain(gen))
+
+        # 4 content/finish chunks + 1 trailing usage chunk.
+        self.assertEqual(len(out), 5)
+
+        # Every non-trailing chunk must have usage=None.
+        for chunk in out[:-1]:
+            self.assertIsNone(chunk.usage)
+            self.assertNotEqual(chunk.choices, [])
+
+        # The trailing chunk is the FINAL chunk on the wire, choices=[],
+        # carries the final usage (not the stale value at first finish).
+        self.assertEqual(out[-1].choices, [])
+        self.assertIsNotNone(out[-1].usage)
+        self.assertEqual(out[-1].usage.completion_tokens, 12)
+        self.assertEqual(out[-1].usage.total_tokens, 16)
+
+
+
 if __name__ == "__main__":
     unittest.main()

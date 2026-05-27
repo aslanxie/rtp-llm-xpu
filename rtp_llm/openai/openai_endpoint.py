@@ -408,7 +408,6 @@ class OpenaiEndpoint(object):
             # Track last-seen usage so we can emit a trailing chunk even
             # when usage and finish_reason arrive on different chunks.
             last_usage = None
-            usage_emitted = False
 
             async for response in choice_generator:
                 if response.usage is not None:
@@ -428,19 +427,16 @@ class OpenaiEndpoint(object):
                     ]
 
                 # See StreamOptions for include_usage semantics.
-                has_finish = (
-                    response.choices
-                    and any(c.finish_reason for c in response.choices)
-                )
                 if include_usage is True:
                     # Spec layout: suppress `usage` on every content chunk;
-                    # emit it once in a trailing choices=[] chunk after the
-                    # chunk that carried finish_reason. Backend may emit
-                    # standalone usage-only chunks (choices=[]) before/after
-                    # the finish chunk; do not forward them as redundant
-                    # empty chunks to the client -- last_usage was already
-                    # captured above and will be flushed via the finish-
-                    # aligned emit or the post-loop fallback below.
+                    # emit it exactly once in a trailing choices=[] chunk
+                    # after the choice_generator is fully drained (see the
+                    # post-loop emission below). This guarantees the usage
+                    # chunk is the final chunk on the wire and reflects
+                    # final stream state -- correct for n>=2 where choices
+                    # finish on different chunks. Backend usage-only frames
+                    # (choices=[]) are captured into `last_usage` above and
+                    # not forwarded as redundant empty chunks.
                     if not response.choices:
                         continue
                     yield ChatCompletionStreamResponse(
@@ -451,15 +447,6 @@ class OpenaiEndpoint(object):
                         extra_outputs=response.extra_outputs,
                     )
                     debug_info_responded = True
-                    if has_finish and last_usage is not None and not usage_emitted:
-                        yield ChatCompletionStreamResponse(
-                            choices=[],
-                            usage=last_usage,
-                            aux_info=None,
-                            debug_info=None,
-                            extra_outputs=None,
-                        )
-                        usage_emitted = True
                 elif include_usage is False:
                     # Symmetric with the include_usage=True path: do not
                     # forward backend usage-only frames (choices=[]) as
@@ -486,15 +473,12 @@ class OpenaiEndpoint(object):
                     )
                     debug_info_responded = True
 
-            # Fallback: if include_usage=True and we accumulated usage but
-            # never emitted it (usage arrived on a different chunk than
-            # finish_reason, or as a standalone usage-only chunk), emit the
-            # trailing usage chunk now so it is never silently lost.
-            if include_usage is True and last_usage is not None and not usage_emitted:
-                logging.warning(
-                    "Usage was not co-located with finish_reason; "
-                    "emitting deferred trailing usage chunk."
-                )
+            # Trailing usage chunk: emitted after the stream is fully
+            # drained so it is always the final chunk on the wire and
+            # carries the last-seen usage. This is correct for n>=2 where
+            # choices finish on different chunks -- the usage emit must
+            # not happen mid-stream when only some choices have finished.
+            if include_usage is True and last_usage is not None:
                 yield ChatCompletionStreamResponse(
                     choices=[],
                     usage=last_usage,
