@@ -320,6 +320,7 @@ class OpenaiEndpoint(object):
                             message=ChatMessage(
                                 role=choice.delta.role or RoleEnum.assistant,
                                 content=choice.delta.content,
+                                reasoning_content=choice.delta.reasoning_content,
                                 function_call=choice.delta.function_call or None,
                                 tool_calls=choice.delta.tool_calls or None,
                             ),
@@ -450,7 +451,7 @@ class OpenaiEndpoint(object):
                         extra_outputs=response.extra_outputs,
                     )
                     debug_info_responded = True
-                    if has_finish and last_usage is not None:
+                    if has_finish and last_usage is not None and not usage_emitted:
                         yield ChatCompletionStreamResponse(
                             choices=[],
                             usage=last_usage,
