@@ -22,7 +22,7 @@ def device_test_envs():
 def device_impl_target():
     return select({
         "@//:using_cuda": [
-            "//rtp_llm/cpp/cuda/ops:cuda_impl",
+            "//rtp_llm/models_py/bindings/cuda/ops:cuda_impl",
         ],
         "//conditions:default": [],
     })

@@ -127,7 +127,6 @@ cc_binary(
             "//rtp_llm/cpp/pybind:th_transformer_gpu",
         ],
         "//conditions:default": [],
-        "@//:using_xpu": [],
     }),
 )
 
