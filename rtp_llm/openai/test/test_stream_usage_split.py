@@ -320,10 +320,6 @@ class TestIncludeUsageTrueUsageOnSeparateChunk(unittest.TestCase):
         self.assertTrue(all(r.usage is None for r in out))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestIncludeUsageEmptyChoicesSkipped(unittest.TestCase):
     """P2: Backend empty-choices usage chunks must not be forwarded as
     redundant empty chunks when include_usage=True."""
@@ -391,3 +387,45 @@ class TestIncludeUsageEmptyChoicesSkipped(unittest.TestCase):
             self.assertIsNone(chunk.usage)
         self.assertEqual(out[3].choices, [])
         self.assertEqual(out[3].usage.completion_tokens, 7)
+
+
+class TestIncludeUsageMultiFinishNoDuplicate(unittest.TestCase):
+    """Round-4 guard: when finish_reason arrives on more than one chunk
+    (e.g. n>=2 with staggered finishes), the trailing usage chunk must
+    be emitted exactly once."""
+
+    def test_two_finish_chunks_emit_single_trailing_usage(self):
+        usage = UsageInfo(prompt_tokens=4, completion_tokens=9, total_tokens=13)
+        # Two consecutive chunks each carrying finish_reason; usage is
+        # already known by the first finish chunk.
+        items = [
+            StreamResponseObject(choices=[_make_choice(content="hi")]),
+            StreamResponseObject(
+                choices=[_make_choice(content="", finish_reason=FinisheReason.stop)],
+                usage=usage,
+            ),
+            StreamResponseObject(
+                choices=[_make_choice(content="", finish_reason=FinisheReason.stop)],
+            ),
+        ]
+        gen = OpenaiEndpoint._complete_stream_response(
+            _gen_from(items),
+            debug_info=None,
+            tokenizer=None,
+            include_usage=True,
+        )
+        out = asyncio.run(_drain(gen))
+
+        # Exactly one trailing usage chunk (choices=[]) should be present.
+        trailing = [c for c in out if c.choices == [] and c.usage is not None]
+        self.assertEqual(len(trailing), 1)
+        self.assertEqual(trailing[0].usage.completion_tokens, 9)
+        # All other chunks must have usage=None.
+        for c in out:
+            if c is trailing[0]:
+                continue
+            self.assertIsNone(c.usage)
+
+
+if __name__ == "__main__":
+    unittest.main()

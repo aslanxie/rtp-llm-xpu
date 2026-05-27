@@ -461,6 +461,12 @@ class OpenaiEndpoint(object):
                         )
                         usage_emitted = True
                 elif include_usage is False:
+                    # Symmetric with the include_usage=True path: do not
+                    # forward backend usage-only frames (choices=[]) as
+                    # redundant empty chunks. With usage suppressed they
+                    # would carry no signal at all.
+                    if not response.choices:
+                        continue
                     yield ChatCompletionStreamResponse(
                         choices=response.choices,
                         usage=None,
