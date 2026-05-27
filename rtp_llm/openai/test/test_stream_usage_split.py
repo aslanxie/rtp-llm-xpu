@@ -252,21 +252,19 @@ class TestIncludeUsageTrueUsageOnSeparateChunk(unittest.TestCase):
         )
         out = asyncio.run(_drain(gen))
 
-        # 3 original chunks forwarded + 1 trailing usage chunk
-        self.assertEqual(len(out), 4)
+        # 2 content/finish chunks + 1 trailing usage chunk
+        # (the standalone empty-choices backend chunk is skipped)
+        self.assertEqual(len(out), 3)
         # Content chunk
         self.assertIsNone(out[0].usage)
         self.assertEqual(len(out[0].choices), 1)
         # Finish chunk (usage suppressed)
         self.assertIsNone(out[1].usage)
         self.assertEqual(out[1].choices[0].finish_reason, FinisheReason.stop)
-        # Standalone usage-only chunk forwarded with usage=None
-        self.assertIsNone(out[2].usage)
-        self.assertEqual(out[2].choices, [])
         # Trailing usage chunk emitted by fallback
-        self.assertEqual(out[3].choices, [])
-        self.assertIsNotNone(out[3].usage)
-        self.assertEqual(out[3].usage.completion_tokens, 8)
+        self.assertEqual(out[2].choices, [])
+        self.assertIsNotNone(out[2].usage)
+        self.assertEqual(out[2].usage.completion_tokens, 8)
 
     def test_usage_before_finish_on_separate_chunk(self):
         """Usage arrives on an early chunk, finish_reason on a later one.
@@ -324,3 +322,72 @@ class TestIncludeUsageTrueUsageOnSeparateChunk(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestIncludeUsageEmptyChoicesSkipped(unittest.TestCase):
+    """P2: Backend empty-choices usage chunks must not be forwarded as
+    redundant empty chunks when include_usage=True."""
+
+    def test_standalone_empty_choices_usage_chunk_is_skipped(self):
+        """A standalone choices=[] usage chunk from the backend should
+        NOT appear in the output stream — only the deferred trailing
+        usage chunk should carry the usage."""
+        usage = UsageInfo(prompt_tokens=5, completion_tokens=10, total_tokens=15)
+        items = [
+            StreamResponseObject(choices=[_make_choice(content="hello")]),
+            # Backend sends usage on a standalone empty-choices chunk
+            StreamResponseObject(choices=[], usage=usage),
+            StreamResponseObject(
+                choices=[_make_choice(content="", finish_reason=FinisheReason.stop)],
+            ),
+        ]
+        gen = OpenaiEndpoint._complete_stream_response(
+            _gen_from(items),
+            debug_info=None,
+            tokenizer=None,
+            include_usage=True,
+        )
+        out = asyncio.run(_drain(gen))
+
+        # 2 content/finish chunks + 1 trailing usage chunk (the empty-choices
+        # backend chunk is NOT forwarded)
+        self.assertEqual(len(out), 3)
+        # Content chunk
+        self.assertIsNone(out[0].usage)
+        self.assertEqual(len(out[0].choices), 1)
+        # Finish chunk
+        self.assertIsNone(out[1].usage)
+        # Trailing usage chunk
+        self.assertEqual(out[2].choices, [])
+        self.assertIsNotNone(out[2].usage)
+        self.assertEqual(out[2].usage.completion_tokens, 10)
+
+    def test_empty_choices_between_content_chunks_skipped(self):
+        """Multiple empty-choices chunks interspersed in the stream
+        should all be filtered out."""
+        usage1 = UsageInfo(prompt_tokens=5, completion_tokens=3, total_tokens=8)
+        usage2 = UsageInfo(prompt_tokens=5, completion_tokens=7, total_tokens=12)
+        items = [
+            StreamResponseObject(choices=[_make_choice(content="a")]),
+            StreamResponseObject(choices=[], usage=usage1),
+            StreamResponseObject(choices=[_make_choice(content="b")]),
+            StreamResponseObject(choices=[], usage=usage2),
+            StreamResponseObject(
+                choices=[_make_choice(content="", finish_reason=FinisheReason.stop)],
+                usage=usage2,
+            ),
+        ]
+        gen = OpenaiEndpoint._complete_stream_response(
+            _gen_from(items),
+            debug_info=None,
+            tokenizer=None,
+            include_usage=True,
+        )
+        out = asyncio.run(_drain(gen))
+
+        # 3 content/finish + 1 trailing usage = 4 total (2 empty skipped)
+        self.assertEqual(len(out), 4)
+        for chunk in out[:3]:
+            self.assertIsNone(chunk.usage)
+        self.assertEqual(out[3].choices, [])
+        self.assertEqual(out[3].usage.completion_tokens, 7)
