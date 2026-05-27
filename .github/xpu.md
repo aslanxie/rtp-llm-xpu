@@ -19,7 +19,8 @@ All skills are orchestrated through a single prompt file and configured via a sh
     ├── xpu-service/SKILL.md             # Phase: service (launch helper)
     ├── xpu-verify/SKILL.md              # Phase: verify
     ├── xpu-perf-benchmark/SKILL.md      # Phase: perf
-    └── xpu-accuracy-benchmark/SKILL.md  # Phase: accuracy
+    ├── xpu-accuracy-benchmark/SKILL.md  # Phase: accuracy
+    └── xpu-kill-service/SKILL.md        # Phase: kill
 ```
 
 ## Configuration
@@ -102,15 +103,18 @@ In VS Code Copilot Chat (Agent mode), type:
 | `verify` | `xpu-verify` | Launch service (via xpu-service), health-check, run a "2+2" function test. | ~2-3 min |
 | `perf` | `xpu-perf-benchmark` | Run `vllm bench serve` with 100 ShareGPT prompts. Reports throughput, TPOT, TTFT. | ~15-20 min |
 | `accuracy` | `xpu-accuracy-benchmark` | Run `lm-eval` GSM8K (10 items, 5-shot). Reports flexible-extract and strict-match scores. | ~5-10 min |
+| `kill` | `xpu-kill-service` | Kill all running rtp_llm service processes and free ports 8088/9088. | ~5 sec |
 
 ### Skill Dependencies
 
 The `xpu-verify`, `xpu-perf-benchmark`, and `xpu-accuracy-benchmark` skills all delegate service launch to the **xpu-service** skill, which handles mode detection and server startup.
 
+The `xpu-kill-service` skill is standalone and can be used at any time to stop running services.
+
 ### Examples
 
 ```
-# Run all 5 phases in order
+# Run all 5 phases in order (kill is not included by default)
 /rtp-llm-xpu
 
 # Merge upstream and build only
@@ -124,6 +128,12 @@ The `xpu-verify`, `xpu-perf-benchmark`, and `xpu-accuracy-benchmark` skills all 
 
 # Just run accuracy benchmark (service must already be running)
 /rtp-llm-xpu accuracy
+
+# Kill running services
+/rtp-llm-xpu kill
+
+# Run perf benchmark then kill the service
+/rtp-llm-xpu perf, kill
 ```
 
 ### Parameter Overrides
@@ -157,22 +167,24 @@ Override binding rules:
 
 Phases always execute in this fixed order regardless of input order:
 
-**sync → build → verify → perf → accuracy**
+**sync → build → verify → perf → accuracy → kill**
 
 ### Dependencies
 
 ```
 sync ──► build ──► verify ──► perf
                       │
-                      └────► accuracy
+                      └────► accuracy ──► kill (optional)
 
 verify uses: xpu-service (for launch)
 perf uses:   xpu-service (for launch)
 accuracy uses: xpu-service (for launch)
+kill:         standalone (no dependencies)
 ```
 
 - `perf` and `accuracy` require the service to be running (started by `verify`)
 - If you skip `verify`, ensure the service is already running on `http://localhost:8088`
+- `kill` can run independently at any time
 
 ## Output Report
 
@@ -193,6 +205,7 @@ After execution, a summary table is generated with only the rows for phases that
 | Median TTFT             | 93.38 ms        |
 | GSM8K flexible-extract  | 0.80            |
 | GSM8K strict-match      | 0.80            |
+| Service killed          | ✅ done         |
 ```
 
 > **Note:** The orchestrator does NOT push to origin. Review the results and push manually.
@@ -208,3 +221,4 @@ After execution, a summary table is generated with only the rows for phases that
 | PD mode DECODE OOM | Reduce `--max_context_batch_size` (default 4) or `num_concurrent` in lm-eval |
 | Timeout / retry in lm-eval | Add `timeout=300` to model_args, or reduce `num_concurrent` |
 | Long tail latency (last requests slow) | Normal for thinking mode (long generations). Use `--think_mode 0` for perf bench |
+| Stale service after code changes | Run `kill` then `verify` to restart with fresh code |

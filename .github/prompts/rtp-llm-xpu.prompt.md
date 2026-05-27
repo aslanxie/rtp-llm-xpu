@@ -2,7 +2,7 @@
 description: "Orchestrate rtp-llm-xpu upstream sync, build, and full verification (function, performance, accuracy) on Intel XPU"
 agent: "agent"
 tools: [execute, read, search, todo]
-argument-hint: "sync, build, verify, perf, accuracy [--param value ...]"
+argument-hint: "sync, build, verify, perf, accuracy, kill [--param value ...]"
 ---
 
 # Auto-Merge & Verify rtp-llm-xpu
@@ -30,11 +30,13 @@ Parse the user's message for which phases to run and any parameter overrides.
 | `verify` | `xpu-verify` | Start service + function test |
 | `perf` | `xpu-perf-benchmark` | Throughput benchmark |
 | `accuracy` | `xpu-accuracy-benchmark` | GSM8K evaluation |
+| `kill` | `xpu-kill-service` | Kill running service processes |
 
 ### Phase rules
 - If user specifies phases (e.g., `sync, build, verify`), run ONLY those phases in order
-- If user provides no phases, run ALL phases in order
+- If user provides no phases, run ALL phases in order (excluding `kill`)
 - Always run phases in the order listed above, regardless of user input order
+- `kill` is never included in the default "all phases" run — it must be explicitly requested
 
 ### Parameter overrides
 
@@ -46,6 +48,7 @@ Examples:
 - `perf --max-concurrency 8` → run perf with `max_concurrency=8`
 - `perf, accuracy --limit 8` → perf uses defaults; accuracy uses `limit=8`
 - `--think-mode 1 perf, accuracy` → both perf and accuracy use `think_mode=1`
+- `kill` → kill all running rtp_llm service processes
 
 Each skill's SKILL.md defines which parameters are overridable in its **Overridable Parameters** section. Pass matched overrides when executing that skill — substitute them into the command templates.
 
@@ -71,6 +74,7 @@ After all selected phases complete, present results for the phases that ran:
 | Median TTFT | XX.XX ms |
 | GSM8K flexible-extract | X.XX |
 | GSM8K strict-match | X.XX |
+| Service killed | ✅ done |
 ```
 
 Only include rows for phases that were executed. Do NOT push to origin.

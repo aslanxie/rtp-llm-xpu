@@ -10,10 +10,11 @@ description: 'Launch rtp-llm-xpu service in standard or PD-disaggregated mode on
 - **WORK_DIR** — workspace path (default: `/workspace/rtp-llm-xpu`)
 - **MODEL_NAME** — e.g., `Qwen3-8B`
 - **MODEL_TYPE** — e.g., `qwen_3`
-- **MODEL_PATH** — checkpoint path, e.g., `/workspace/Qwen3-8B`
+- **MODEL_PATH** — checkpoint path, e.g., `/workspace/Qwen3-8B` (use this full model path, not `/workspace/Qwen3-8B-Base`)
 - **TP_SIZE** — tensor parallelism (default `1`)
 - **ZE_AFFINITY_MASK** — single value (e.g., `0`) = single GPU, two comma-separated values (e.g., `2,3`) = PD disaggregation
 - **FRONTEND_SERVER_COUNT** — number of frontend servers (default `1`)
+- **THINK_MODE** — `1` = enable thinking, `0` = disable (default `1`)
 
 ## Determine Mode
 
@@ -63,6 +64,7 @@ python3 rtp_llm/start_server.py \
   --tp_size $TP_SIZE \
   --seq_size_per_block 64 \
   --concurrency_limit 16 \
+  --think_mode ${THINK_MODE:-1} \
   --warm_up 0 \
   2>&1 | tee ./logs/standard.log
 ```
@@ -86,6 +88,10 @@ export PYTHONPATH=$(pwd):$PYTHONPATH
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
 export no_proxy="localhost,127.0.0.1"
 export MODEL_SERVICE_CONFIG='{"service_id":"local","use_local":true,"role_endpoints":[{"group":"default","prefill_endpoint":{"type":"Vipserver","address":"127.0.0.1:8088","protocol":"http","path":"/"},"decode_endpoint":{"type":"Vipserver","address":"127.0.0.1:9088","protocol":"http","path":"/"}}]}'
+
+export CACHE_STORE_MESSAGER_IO_THREAD_COUNT=16
+export CACHE_STORE_MESSAGER_WORKER_THREAD_COUNT=64
+export LOAD_CACHE_TIMEOUT_MS=180000
 ```
 
 ### B1. DECODE server (DECODE_DEVICE, port 9088) — START FIRST
@@ -105,6 +111,7 @@ python3 rtp_llm/start_server.py \
   --concurrency_limit 16 \
   --max_context_batch_size 4 \
   --concurrency_with_block true \
+  --think_mode ${THINK_MODE:-1} \
   --warm_up 0 \
   2>&1 | tee ./logs/decode.log
 ```
@@ -127,6 +134,7 @@ python3 rtp_llm/start_server.py \
   --seq_size_per_block 64 \
   --concurrency_limit 64 \
   --concurrency_with_block true \
+  --think_mode ${THINK_MODE:-1} \
   --warm_up 0 \
   2>&1 | tee ./logs/prefill.log
 ```
@@ -139,9 +147,15 @@ Client always talks to port **8088** (PREFILL endpoint).
 
 Qwen3 has chain-of-thought thinking via `<think>...</think>`. Generations are much longer in thinking mode.
 
-### Enable (default for Qwen3)
+### Enable (`--think_mode 1`)
 
-No extra flags needed. For accuracy eval with thinking, use `--num_fewshot 0` in lm-eval.
+Add `--think_mode 1` to the launch command. Apply to STANDARD or BOTH PD servers.
+For accuracy eval with thinking, use `--num_fewshot 0` in lm-eval.
+
+When think mode is enabled, use lower concurrency limits to accommodate
+longer generations:
+- DECODE: `--concurrency_limit 8`
+- PREFILL: `--concurrency_limit 32`
 
 ### Disable (recommended for perf bench and few-shot accuracy eval)
 

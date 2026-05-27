@@ -10,7 +10,7 @@ description: 'Run vllm serving benchmark on rtp-llm-xpu with ShareGPT dataset. U
 - **WORK_DIR** — workspace path
 - **MODEL_NAME** — model name
 - **MODEL_TYPE** — model type (e.g., `qwen_3`)
-- **MODEL_PATH** — tokenizer / checkpoint path
+- **MODEL_PATH** — tokenizer / checkpoint path (for Qwen3-8B benchmarking, use `/workspace/Qwen3-8B`, not `/workspace/Qwen3-8B-Base`)
 - **TP_SIZE** — tensor parallelism size
 - **ZE_AFFINITY_MASK** — XPU device mask. Single value (e.g., `0`) = single GPU. Two values (e.g., `0,1`) = PD disaggregation.
 - **FRONTEND_SERVER_COUNT** — number of frontend servers

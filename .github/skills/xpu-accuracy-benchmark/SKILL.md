@@ -10,7 +10,7 @@ description: 'Run GSM8K accuracy evaluation on rtp-llm-xpu using lm-eval. Use wh
 - **WORK_DIR** — workspace path
 - **MODEL_NAME** — model name (e.g., `Qwen3-8B`)
 - **MODEL_TYPE** — model type (e.g., `qwen_3`)
-- **MODEL_PATH** — checkpoint path (e.g., `/workspace/Qwen3-8B`)
+- **MODEL_PATH** — checkpoint path (e.g., `/workspace/Qwen3-8B`). Do not use `/workspace/Qwen3-8B-Base` for service benchmarks.
 - **TP_SIZE** — tensor parallelism size
 - **ZE_AFFINITY_MASK** — XPU device mask. Single value (e.g., `0`) = single GPU. Two values (e.g., `0,1`) = PD disaggregation.
 - **FRONTEND_SERVER_COUNT** — number of frontend servers
@@ -61,7 +61,7 @@ For PD mode, use `num_concurrent=4` and `timeout=300` to stay within KV cache ca
 cd $WORK_DIR
 lm_eval --model local-chat-completions \
     --tasks gsm8k \
-    --model_args "model=$MODEL_NAME,base_url=http://localhost:8088/v1/chat/completions,num_concurrent=${NUM_CONCURRENT:-4},max_retries=3,max_length=4096,max_gen_toks=2048,timeout=300" \
+    --model_args "model=$MODEL_NAME,base_url=http://localhost:8088/v1/chat/completions,num_concurrent=${NUM_CONCURRENT:-4},max_retries=3,max_length=8192,max_gen_toks=4096,timeout=600" \
     --apply_chat_template \
     --num_fewshot ${NUM_FEWSHOT:-5} \
     --limit ${LIMIT:-64} 2>&1 | tee ./logs/accuracy_benchmark.log
