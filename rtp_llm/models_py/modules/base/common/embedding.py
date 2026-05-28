@@ -33,10 +33,13 @@ class Embedding(nn.Module):
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         tokens = input.size(0)
         hidden_size = self.weight.size(-1)
-        output = torch.empty(
-            (tokens, hidden_size), dtype=self.weight.dtype, device=input.device
-        )
-        rtp_llm_ops.embedding(output, input, self.weight.data)
+        if not hasattr(rtp_llm_ops, 'embedding'):
+            output = F.embedding(input, self.weight.data)
+        else:
+            output = torch.empty(
+                (tokens, hidden_size), dtype=self.weight.dtype, device=input.device
+            )
+            rtp_llm_ops.embedding(output, input, self.weight.data)
         if self.tp_size > 1:
             m, n = output.shape
             output = all_gather(output, group=Group.TP)

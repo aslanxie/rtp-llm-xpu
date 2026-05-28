@@ -5,6 +5,16 @@
 #include "rtp_llm/cpp/disaggregate/cache_store/CacheStoreUtil.h"
 #include "rtp_llm/cpp/utils/Logger.h"
 
+namespace {
+#if USING_ROCM
+constexpr c10::DeviceType kCacheStoreGpuDevice = torch::kCUDA;
+#elif USING_XPU
+constexpr c10::DeviceType kCacheStoreGpuDevice = torch::kXPU;
+#else
+constexpr c10::DeviceType kCacheStoreGpuDevice = torch::kCUDA;
+#endif
+}
+
 namespace rtp_llm {
 
 TcpCacheStoreLoadServiceClosure::~TcpCacheStoreLoadServiceClosure() {
@@ -56,7 +66,7 @@ void TcpCacheStoreLoadServiceClosure::Run() {
         auto dst_tensor = torch::from_blob(
             unload_block->addr.get(),
             {(int64_t)unload_block->len},
-            torch::TensorOptions().dtype(torch::kUInt8).device(unload_block->gpu_mem ? torch::kCUDA : torch::kCPU));
+            torch::TensorOptions().dtype(torch::kUInt8).device(unload_block->gpu_mem ? kCacheStoreGpuDevice : torch::kCPU));
         auto src_tensor = torch::from_blob(const_cast<char*>(block.content().data()),
                                            {(int64_t)block.len()},
                                            torch::TensorOptions().dtype(torch::kUInt8).device(torch::kCPU));

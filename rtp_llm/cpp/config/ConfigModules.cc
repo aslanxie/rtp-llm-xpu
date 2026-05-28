@@ -226,7 +226,6 @@ std::string MoeConfig::to_string() const {
 // ModelSpecificConfig
 std::string ModelSpecificConfig::to_string() const {
     std::ostringstream oss;
-    // Empty struct — no fields remaining.
     return oss.str();
 }
 
