@@ -41,9 +41,6 @@ Use the **xpu-verify** skill to ensure the service is running with up-to-date co
 - Detect code changes or upstream merges and restart the service if needed
 - Launch the service if not running
 - Skip restart if the service is healthy and no changes detected
-
-Pass `--think_mode 0` when launching (recommended for perf benchmarks to avoid long chain-of-thought generations that skew latency metrics).
-
 Follow the xpu-verify skill procedure, then return here.
 
 ### 2. Run Benchmark

@@ -40,9 +40,6 @@ Use the **xpu-verify** skill to ensure the service is running with up-to-date co
 - Detect code changes or upstream merges and restart the service if needed
 - Launch the service if not running
 - Skip restart if the service is healthy and no changes detected
-
-Pass `--think_mode 0` when launching. Thinking mode (`--think_mode 1`) consumes the entire generation budget on reasoning tokens, leaving no room for the actual answer — making lm-eval scores unreliable.
-
 Follow the xpu-verify skill procedure, then return here.
 
 ### 2. Run lm-eval
@@ -77,7 +74,7 @@ From the lm-eval output table, extract:
 - **flexible-extract** score (0.0-1.0) — lenient answer extraction
 - **strict-match** score (0.0-1.0) — exact match
 
-Expected baseline for Qwen3-8B: ~0.5 or above on flexible-extract with 64 items (5-shot, think_mode 0).
+Expected baseline for Qwen3-8B: ~0.5 or above on flexible-extract with 64 items.
 
 ## Output
 - Report: mode (standard/PD), flexible-extract score, strict-match score, number of items evaluated
