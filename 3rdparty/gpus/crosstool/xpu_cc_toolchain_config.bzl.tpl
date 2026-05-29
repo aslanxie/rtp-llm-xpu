@@ -918,32 +918,6 @@ def _impl(ctx):
         ],
     )
 
-    redirector_feature = feature(
-        name = "redirector",
-        enabled = True,
-        flag_sets = [
-            flag_set(
-                actions = [
-                    ACTION_NAMES.c_compile,
-                    ACTION_NAMES.cpp_compile,
-                    ACTION_NAMES.cpp_module_compile,
-                    ACTION_NAMES.cpp_module_codegen,
-                    ACTION_NAMES.cpp_header_parsing,
-                    ACTION_NAMES.assemble,
-                    ACTION_NAMES.preprocess_assemble,
-                ],
-                flag_groups = [
-                    flag_group(
-                        flags = [
-                            "-B",
-                            "external/local_config_cuda/crosstool/windows/msvc_wrapper_for_nvcc.py",
-                        ],
-                    ),
-                ],
-            ),
-        ],
-    )
-
     linker_bin_path_feature = feature(
         name = "linker-bin-path",
         flag_sets = [
@@ -1376,7 +1350,6 @@ def _impl(ctx):
     elif (ctx.attr.cpu == "x64_windows"):
         features = [
             no_legacy_features_feature,
-            redirector_feature,
             nologo_feature,
             has_configured_linker_path_feature,
             no_stripping_feature,

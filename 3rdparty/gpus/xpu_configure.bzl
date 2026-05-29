@@ -138,10 +138,12 @@ def _find_icpx(repository_ctx, oneapi_root):
     auto_configure_fail("Cannot find icpx compiler. Ensure Intel oneAPI is installed.")
 
 def _enable_xpu(repository_ctx):
-    """Check if XPU build is requested via using_xpu=true define."""
-    # XPU is only needed when building with --config=xpu (which sets using_xpu=true).
-    # Check TF_NEED_CUDA: if it's "0", we might be on XPU. But the most reliable
-    # signal is whether oneAPI is actually installed.
+    """Check if XPU build is requested via TF_NEED_XPU env var and oneAPI is available."""
+    # Only enable XPU when explicitly requested via TF_NEED_XPU=1 (set by --config=xpu
+    # in .bazelrc). This prevents false positives on CUDA/ROCm hosts that happen to
+    # have oneAPI installed.
+    if repository_ctx.os.environ.get("TF_NEED_XPU", "0") != "1":
+        return False
     oneapi_root = repository_ctx.os.environ.get(_ONEAPI_ROOT, "")
     if oneapi_root and repository_ctx.path(oneapi_root).exists:
         return True

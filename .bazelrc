@@ -199,6 +199,8 @@ build:xpu --define=using_xpu=true
 build:xpu --copt="-DUSING_CUDA=0"
 build:xpu --copt="-DUSING_XPU=1"
 build:xpu --action_env TF_NEED_CUDA="0"
+build:xpu --action_env TF_NEED_XPU="1"
+build:xpu --host_action_env TF_NEED_XPU="1"
 build:xpu --host_action_env TF_NEED_CUDA="0"
 build:xpu --crosstool_top=@local_config_xpu//crosstool:toolchain
 build:xpu --host_crosstool_top=@local_config_xpu//crosstool:toolchain
