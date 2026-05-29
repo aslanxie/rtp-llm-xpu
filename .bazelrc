@@ -202,6 +202,7 @@ build:xpu --action_env TF_NEED_CUDA="0"
 build:xpu --action_env TF_NEED_XPU="1"
 build:xpu --host_action_env TF_NEED_XPU="1"
 build:xpu --host_action_env TF_NEED_CUDA="0"
+build:xpu --action_env SYCL_TARGET="intel_gpu_pvc"
 build:xpu --crosstool_top=@local_config_xpu//crosstool:toolchain
 build:xpu --host_crosstool_top=@local_config_xpu//crosstool:toolchain
 build:xpu --copt="-D_GLIBCXX_USE_CXX11_ABI=1"

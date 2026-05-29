@@ -5,10 +5,14 @@
   * `PYTHON_BIN_PATH`: The python binary path. Used to detect site-packages
     for the torch_xpu repository.
   * `ONEAPI_ROOT`: Path to Intel oneAPI installation. Default: /opt/intel/oneapi
+  * `SYCL_TARGET`: SYCL ahead-of-time compilation target. Default: spir64
+    (JIT). Examples: intel_gpu_pvc, intel_gpu_bmg, spir64.
 """
 
 _ONEAPI_ROOT = "ONEAPI_ROOT"
 _PYTHON_BIN_PATH = "PYTHON_BIN_PATH"
+_SYCL_TARGET = "SYCL_TARGET"
+_DEFAULT_SYCL_TARGET = "spir64"
 
 def _tpl(repository_ctx, tpl, substitutions = {}, out = None):
     if not out:
@@ -121,10 +125,9 @@ def _find_icx(repository_ctx, oneapi_root):
     candidate = oneapi_root + "/compiler/latest/bin/icx"
     if repository_ctx.path(candidate).exists:
         return candidate
-    # Try without 'latest' symlink
-    result = repository_ctx.execute(["which", "icx"])
-    if result.return_code == 0:
-        return result.stdout.strip()
+    icx = repository_ctx.which("icx")
+    if icx != None:
+        return str(icx)
     auto_configure_fail("Cannot find icx compiler. Ensure Intel oneAPI is installed.")
 
 def _find_icpx(repository_ctx, oneapi_root):
@@ -132,16 +135,17 @@ def _find_icpx(repository_ctx, oneapi_root):
     candidate = oneapi_root + "/compiler/latest/bin/icpx"
     if repository_ctx.path(candidate).exists:
         return candidate
-    result = repository_ctx.execute(["which", "icpx"])
-    if result.return_code == 0:
-        return result.stdout.strip()
+    icpx = repository_ctx.which("icpx")
+    if icpx != None:
+        return str(icpx)
     auto_configure_fail("Cannot find icpx compiler. Ensure Intel oneAPI is installed.")
+
+def _get_sycl_target(repository_ctx):
+    """Get the SYCL ahead-of-time compilation target."""
+    return repository_ctx.os.environ.get(_SYCL_TARGET, _DEFAULT_SYCL_TARGET)
 
 def _enable_xpu(repository_ctx):
     """Check if XPU build is requested via TF_NEED_XPU env var and oneAPI is available."""
-    # Only enable XPU when explicitly requested via TF_NEED_XPU=1 (set by --config=xpu
-    # in .bazelrc). This prevents false positives on CUDA/ROCm hosts that happen to
-    # have oneAPI installed.
     if repository_ctx.os.environ.get("TF_NEED_XPU", "0") != "1":
         return False
     oneapi_root = repository_ctx.os.environ.get(_ONEAPI_ROOT, "")
@@ -152,13 +156,33 @@ def _enable_xpu(repository_ctx):
             return True
     return False
 
+def _get_python_bin(repository_ctx):
+    """Get the python binary path, or fail with a clear message."""
+    python_bin = repository_ctx.os.environ.get(_PYTHON_BIN_PATH, "")
+    if python_bin:
+        return python_bin
+    python_bin = repository_ctx.which("python3")
+    if python_bin != None:
+        return str(python_bin)
+    auto_configure_fail(
+        "Cannot find python3 in PATH. Please set PYTHON_BIN_PATH " +
+        "environment variable or ensure python3 is installed.")
+
 def _create_dummy_repository(repository_ctx):
     """Create a minimal stub repository when XPU SDK is not available."""
-    repository_ctx.file("BUILD", """
+    repository_ctx.file("BUILD.bazel", """
 package(default_visibility = ["//visibility:public"])
 
 cc_library(
     name = "crosstool",
+)
+
+# Stub py_runtime so --python_top=@local_config_xpu//:python_runtime resolves.
+py_runtime(
+    name = "python_runtime",
+    interpreter_path = "/usr/bin/python3",
+    python_version = "PY3",
+    visibility = ["//visibility:public"],
 )
 """)
     repository_ctx.file("crosstool/BUILD", """
@@ -170,6 +194,16 @@ cc_toolchain_suite(
     name = "toolchain",
     toolchains = {},
 )
+""")
+
+    # Stub xpu/BUILD so @local_config_xpu//xpu: targets resolve on non-XPU builds.
+    repository_ctx.file("xpu/BUILD", """
+package(default_visibility = ["//visibility:public"])
+
+cc_library(name = "xpu_headers")
+cc_library(name = "sycl_runtime")
+cc_library(name = "ze_loader")
+cc_library(name = "xpu")
 """)
 
 def _xpu_configure_impl(repository_ctx):
@@ -236,9 +270,13 @@ def _xpu_configure_impl(repository_ctx):
     verify_build_defines(xpu_defines)
 
     _tpl(repository_ctx, "crosstool:BUILD", xpu_defines)
+
+    # Substitute SYCL target into toolchain config template
+    sycl_target = _get_sycl_target(repository_ctx)
     _tpl(
         repository_ctx,
         "crosstool:xpu_cc_toolchain_config.bzl",
+        {"%{xpu_sycl_target}": sycl_target},
         out = "crosstool/cc_toolchain_config.bzl",
     )
 
@@ -275,11 +313,7 @@ def _xpu_configure_impl(repository_ctx):
     _tpl(repository_ctx, "xpu:BUILD", xpu_build_substitutions)
 
     # --- Generate py_runtime so .bazelrc can set --python_top=@local_config_xpu//:python_runtime ---
-    python_bin = repository_ctx.os.environ.get(_PYTHON_BIN_PATH, "")
-    if not python_bin:
-        python_bin = str(repository_ctx.which("python3"))
-    else:
-        python_bin = str(python_bin)
+    python_bin = _get_python_bin(repository_ctx)
     repository_ctx.file("BUILD.bazel", content = """
 py_runtime(
     name = "python_runtime",
@@ -291,23 +325,23 @@ py_runtime(
 """ % (python_bin, python_bin))
 
     # --- Torch XPU site-packages setup ---
-    if python_bin:
-        result = repository_ctx.execute([
-            str(python_bin), "-c",
-            "import site; print(site.getsitepackages()[0])",
-        ])
-        if result.return_code == 0:
-            site_packages = result.stdout.strip()
-            repository_ctx.file(
-                "xpu/site_packages.bzl",
-                'XPU_SITE_PACKAGES = "%s"\n' % site_packages,
-            )
+    result = repository_ctx.execute([
+        python_bin, "-c",
+        "import site; print(site.getsitepackages()[0])",
+    ])
+    if result.return_code == 0:
+        site_packages = result.stdout.strip()
+        repository_ctx.file(
+            "xpu/site_packages.bzl",
+            'XPU_SITE_PACKAGES = "%s"\n' % site_packages,
+        )
 
 xpu_configure = repository_rule(
     implementation = _xpu_configure_impl,
     environ = [
         _ONEAPI_ROOT,
         _PYTHON_BIN_PATH,
+        _SYCL_TARGET,
     ],
     doc = """Configures the Intel XPU (icx/icpx) C/C++ toolchain.
 

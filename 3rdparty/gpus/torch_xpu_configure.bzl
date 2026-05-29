@@ -15,10 +15,11 @@ def _torch_xpu_configure_impl(repository_ctx):
     python_bin = repository_ctx.os.environ.get("PYTHON_BIN_PATH", "")
     if not python_bin:
         python_bin = repository_ctx.which("python3")
-        if not python_bin:
+        if python_bin == None:
             # No python3 — create dummy and return
             repository_ctx.file("BUILD.bazel", "# dummy torch_xpu repo (no python3 found)\n")
             return
+        python_bin = str(python_bin)
 
     # Check if torch.xpu is available in this Python
     check = repository_ctx.execute([

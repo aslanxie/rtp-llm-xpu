@@ -443,7 +443,7 @@ def _impl(ctx):
                 actions = [ACTION_NAMES.cpp_compile],
                 flag_groups = [flag_group(flags = [
                     "-fsycl",
-                    "-fsycl-targets=intel_gpu_pvc",
+                    "-fsycl-targets=%{xpu_sycl_target}",
                 ])],
             ),
         ],
