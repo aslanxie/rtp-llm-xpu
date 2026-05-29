@@ -293,15 +293,15 @@ def _xpu_configure_impl(repository_ctx):
     xpu_build_substitutions = {}
     if repository_ctx.path(sycl_lib).exists:
         repository_ctx.symlink(sycl_lib, "xpu/lib/libsycl.so")
-        xpu_build_substitutions["%{sycl_runtime_lib}"] = "xpu/lib/libsycl.so"
+        xpu_build_substitutions["%{sycl_runtime_srcs}"] = '["xpu/lib/libsycl.so"]'
     else:
-        xpu_build_substitutions["%{sycl_runtime_lib}"] = ""
+        xpu_build_substitutions["%{sycl_runtime_srcs}"] = "[]"
 
     if ze_loader_lib:
         repository_ctx.symlink(ze_loader_lib, "xpu/lib/libze_loader.so")
-        xpu_build_substitutions["%{ze_loader_lib}"] = "xpu/lib/libze_loader.so"
+        xpu_build_substitutions["%{ze_loader_srcs}"] = '["xpu/lib/libze_loader.so"]'
     else:
-        xpu_build_substitutions["%{ze_loader_lib}"] = ""
+        xpu_build_substitutions["%{ze_loader_srcs}"] = "[]"
 
     xpu_build_substitutions["%{copy_rules}"] = ""
 
@@ -339,6 +339,7 @@ py_runtime(
 xpu_configure = repository_rule(
     implementation = _xpu_configure_impl,
     environ = [
+        "TF_NEED_XPU",
         _ONEAPI_ROOT,
         _PYTHON_BIN_PATH,
         _SYCL_TARGET,

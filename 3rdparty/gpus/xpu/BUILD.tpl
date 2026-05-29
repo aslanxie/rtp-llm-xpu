@@ -1,4 +1,3 @@
-licenses(["notice"])  # Apache 2.0
 
 package(default_visibility = ["//visibility:public"])
 
@@ -22,8 +21,8 @@ cc_library(
 
 cc_library(
     name = "sycl_runtime",
-    srcs = ["%{sycl_runtime_lib}"],
-    data = ["%{sycl_runtime_lib}"],
+    srcs = %{sycl_runtime_srcs},
+    data = %{sycl_runtime_srcs},
     includes = [
         ".",
         "xpu/include",
@@ -34,8 +33,8 @@ cc_library(
 
 cc_library(
     name = "ze_loader",
-    srcs = ["%{ze_loader_lib}"],
-    data = ["%{ze_loader_lib}"],
+    srcs = %{ze_loader_srcs},
+    data = %{ze_loader_srcs},
     linkstatic = 1,
     visibility = ["//visibility:public"],
 )
