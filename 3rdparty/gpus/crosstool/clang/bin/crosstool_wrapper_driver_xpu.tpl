@@ -14,8 +14,10 @@ DESCRIPTION:
 from __future__ import print_function
 
 import os
+import shlex
 import subprocess
 import sys
+import tempfile
 
 # Template values set by xpu_configure.bzl
 ICX_PATH = '%{icx_path}'
@@ -69,35 +71,59 @@ def _filter_flags(argv):
             continue
         if any(arg.startswith(p) for p in _UNSUPPORTED_PREFIXES):
             continue
+        # icx does not support -mcpu=; map to -march= with the same value
+        # to preserve deterministic builds (avoid -march=native).
         if arg.startswith('-mcpu='):
-            filtered.append('-march=native')
+            filtered.append('-march=' + arg[len('-mcpu='):])
             continue
         filtered.append(arg)
     return filtered
 
 
-def _expand_params_files(argv):
-    """Expand @params file arguments inline."""
-    expanded = []
+def _read_params_file(path):
+    """Read a Bazel @params file, handling quoting."""
+    args = []
+    with open(path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                # Bazel params files may contain shell-quoted args
+                args.extend(shlex.split(line))
+    return args
+
+
+def _process_params_files(argv):
+    """Filter flags inside @params files and rewrite them.
+
+    Instead of expanding all args inline (which risks hitting ARG_MAX),
+    this rewrites each @params file with filtered content and passes the
+    rewritten @file reference to the compiler.
+    """
+    processed = []
     for arg in argv:
         if arg.startswith('@') and not arg.startswith('@rpath'):
             params_file = arg[1:]
             try:
-                with open(params_file, 'r') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            expanded.append(line)
+                params_args = _read_params_file(params_file)
+                params_args = _filter_flags(params_args)
+                # Write filtered args to a new params file
+                fd, tmp_path = tempfile.mkstemp(
+                    prefix='xpu_params_', suffix='.txt')
+                with os.fdopen(fd, 'w') as tmp:
+                    for a in params_args:
+                        tmp.write(shlex.quote(a) + '\n')
+                processed.append('@' + tmp_path)
             except IOError:
-                expanded.append(arg)
+                processed.append(arg)
         else:
-            expanded.append(arg)
-    return expanded
+            processed.append(arg)
+    return processed
 
 
 def main():
     argv = sys.argv[1:]
-    argv = _expand_params_files(argv)
+    argv = _process_params_files(argv)
+    # Filter top-level flags (non-@params args)
     argv = _filter_flags(argv)
 
     is_asm = _is_assembler(argv)
