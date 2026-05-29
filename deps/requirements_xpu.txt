@@ -4,7 +4,7 @@
 # xfastertransformer*, decord, onnx) are deliberately excluded.
 #
 # Install with:
-#   pip install -r open_source/deps/requirements_xpu.txt \
+#   pip install -r deps/requirements_xpu.txt \
 #       --extra-index-url https://download.pytorch.org/whl/xpu
 
 # ---------- Pin torch/torchvision to prevent CUDA upgrade ----------
