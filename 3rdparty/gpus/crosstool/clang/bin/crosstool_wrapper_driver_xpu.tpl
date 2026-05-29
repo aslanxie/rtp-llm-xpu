@@ -14,7 +14,6 @@ DESCRIPTION:
 from __future__ import print_function
 
 import os
-import shlex
 import subprocess
 import sys
 import tempfile
@@ -81,14 +80,19 @@ def _filter_flags(argv):
 
 
 def _read_params_file(path):
-    """Read a Bazel @params file, handling quoting."""
+    """Read a Bazel @params file line-by-line.
+
+    Bazel params files use one argument per line (multiline format).
+    Lines are read verbatim — no shell unquoting — to preserve arguments
+    that contain spaces, quotes, or other special characters exactly as
+    Bazel wrote them.
+    """
     args = []
     with open(path, 'r') as f:
         for line in f:
-            line = line.strip()
+            line = line.rstrip('\n')
             if line:
-                # Bazel params files may contain shell-quoted args
-                args.extend(shlex.split(line))
+                args.append(line)
     return args
 
 
@@ -98,49 +102,62 @@ def _process_params_files(argv):
     Instead of expanding all args inline (which risks hitting ARG_MAX),
     this rewrites each @params file with filtered content and passes the
     rewritten @file reference to the compiler.
+
+    Returns (processed_argv, tmp_files) where tmp_files is the list of
+    temporary file paths created, so callers can clean them up.
     """
     processed = []
+    tmp_files = []
     for arg in argv:
         if arg.startswith('@') and not arg.startswith('@rpath'):
             params_file = arg[1:]
             try:
                 params_args = _read_params_file(params_file)
                 params_args = _filter_flags(params_args)
-                # Write filtered args to a new params file
+                # Write filtered args to a new params file (one per line,
+                # matching Bazel's multiline params format).
                 fd, tmp_path = tempfile.mkstemp(
                     prefix='xpu_params_', suffix='.txt')
                 with os.fdopen(fd, 'w') as tmp:
                     for a in params_args:
-                        tmp.write(shlex.quote(a) + '\n')
+                        tmp.write(a + '\n')
+                tmp_files.append(tmp_path)
                 processed.append('@' + tmp_path)
             except IOError:
                 processed.append(arg)
         else:
             processed.append(arg)
-    return processed
+    return processed, tmp_files
 
 
 def main():
     argv = sys.argv[1:]
-    argv = _process_params_files(argv)
-    # Filter top-level flags (non-@params args)
-    argv = _filter_flags(argv)
+    argv, tmp_files = _process_params_files(argv)
+    try:
+        # Filter top-level flags (non-@params args)
+        argv = _filter_flags(argv)
 
-    is_asm = _is_assembler(argv)
-    use_cxx = _is_cpp(argv)
+        is_asm = _is_assembler(argv)
+        use_cxx = _is_cpp(argv)
 
-    if use_cxx:
-        compiler = ICPX_PATH
-        extra = ['-isystem', ONEAPI_INCLUDE, '-include', 'cstdint']
-    elif is_asm:
-        compiler = ICX_PATH
-        extra = []
-    else:
-        compiler = ICX_PATH
-        extra = ['-isystem', ONEAPI_INCLUDE, '-D_GNU_SOURCE', '-include', 'stdint.h', '-include', 'unistd.h']
+        if use_cxx:
+            compiler = ICPX_PATH
+            extra = ['-isystem', ONEAPI_INCLUDE, '-include', 'cstdint']
+        elif is_asm:
+            compiler = ICX_PATH
+            extra = []
+        else:
+            compiler = ICX_PATH
+            extra = ['-isystem', ONEAPI_INCLUDE, '-D_GNU_SOURCE', '-include', 'stdint.h', '-include', 'unistd.h']
 
-    cmd = [compiler] + extra + argv
-    return subprocess.call(cmd)
+        cmd = [compiler] + extra + argv
+        return subprocess.call(cmd)
+    finally:
+        for f in tmp_files:
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
 
 
 if __name__ == '__main__':

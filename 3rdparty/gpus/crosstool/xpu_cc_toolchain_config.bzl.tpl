@@ -434,6 +434,10 @@ def _impl(ctx):
     )
 
     # SYCL compilation flags: enable SYCL language mode and target Intel GPUs.
+    # NOT enabled globally: -fsycl pulls in SYCL headers that require C++17,
+    # which breaks third-party targets compiled with older standards (e.g.
+    # boringssl with -std=c++11). SYCL flags are instead passed via
+    # per_file_copt or target-level copts for SYCL source files only.
     # -fsycl enables the SYCL compilation pipeline (host + device passes).
     # -fsycl-targets specifies the ahead-of-time compilation target.
     xpu_sycl_compile_feature = feature(
