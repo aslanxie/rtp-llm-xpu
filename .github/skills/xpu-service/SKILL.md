@@ -1,6 +1,6 @@
 ---
 name: xpu-service
-description: 'Launch rtp-llm-xpu service in standard or PD-disaggregated mode on Intel XPU, with optional thinking mode. Use when: starting service for verify/benchmark/accuracy tests, switching between single-GPU and dual-GPU PD setups, toggling Qwen3 thinking mode.'
+description: 'Launch rtp-llm-xpu service in standard, TP (tensor parallel), or PD-disaggregated mode on Intel XPU, with optional thinking mode. Use when: starting service for verify/benchmark/accuracy tests, switching between single-GPU, multi-GPU TP, and dual-GPU PD setups, toggling Qwen3 thinking mode.'
 ---
 
 # rtp-llm-xpu Service Launch
@@ -12,22 +12,23 @@ description: 'Launch rtp-llm-xpu service in standard or PD-disaggregated mode on
 - **MODEL_TYPE** — e.g., `qwen_3`
 - **MODEL_PATH** — checkpoint path, e.g., `/workspace/Qwen3-8B` (use this full model path, not `/workspace/Qwen3-8B-Base`)
 - **TP_SIZE** — tensor parallelism (default `1`)
-- **ZE_AFFINITY_MASK** — single value (e.g., `0`) = single GPU, two comma-separated values (e.g., `2,3`) = PD disaggregation
+- **ZE_AFFINITY_MASK** — device IDs. Single value (e.g., `0`) = single GPU; comma-separated (e.g., `0,1`) for TP or PD. For TP mode, auto-generated from `TP_SIZE` if not set
 - **FRONTEND_SERVER_COUNT** — number of frontend servers (default `1`)
 - **THINK_MODE** — `1` = enable thinking, `0` = disable (default `1`)
 
 ## Determine Mode
 
-Parse `ZE_AFFINITY_MASK`:
-- If it contains a comma (e.g., `2,3`): **PD Mode**. Split on comma — first value = PREFILL device, second value = DECODE device.
-- If single value (e.g., `0`): **Standard Mode**.
+Check `TP_SIZE` first, then parse `ZE_AFFINITY_MASK`:
+1. If `TP_SIZE > 1`: **TP Mode** (tensor parallel across multiple XPUs). Build `ZE_AFFINITY_MASK` from the first `TP_SIZE` device IDs (e.g., `TP_SIZE=2` → `ZE_AFFINITY_MASK=0,1`; `TP_SIZE=4` → `ZE_AFFINITY_MASK=0,1,2,3`). If `ZE_AFFINITY_MASK` already has enough devices, use it as-is.
+2. Else if `ZE_AFFINITY_MASK` contains a comma (e.g., `2,3`): **PD Mode**. Split on comma — first value = PREFILL device, second value = DECODE device.
+3. Else (single value, e.g., `0`): **Standard Mode**.
 
 **Important:** Use the actual device IDs from `ZE_AFFINITY_MASK`. Do NOT hardcode `0` and `1`.
 For example, if `ZE_AFFINITY_MASK=2,3`, then PREFILL runs on device `2` and DECODE on device `3`.
 
 ## When to Use
 - Starting service before accuracy / perf benchmark
-- Switching between single-GPU and PD disaggregation
+- Switching between single-GPU, multi-GPU TP, and PD disaggregation
 - Toggling thinking mode for Qwen3
 
 ## Common Setup (run once per shell)
@@ -73,7 +74,35 @@ Health: `curl -sS --max-time 5 http://localhost:8088/health`
 
 ---
 
-## Mode B: PD Disaggregation (2 XPUs, e.g., ZE_AFFINITY_MASK=2,3)
+## Mode B: TP (tensor parallel, TP_SIZE > 1)
+
+Launch across `TP_SIZE` XPUs, client port 8088. Run in an **async terminal**.
+
+Build the affinity mask: if `ZE_AFFINITY_MASK` does not already have `TP_SIZE` devices, generate it as `0,1,...,TP_SIZE-1`.
+
+```
+ZE_AFFINITY_MASK=$ZE_AFFINITY_MASK FRONTEND_SERVER_COUNT=1 \
+python3 rtp_llm/start_server.py \
+  --checkpoint_path $MODEL_PATH \
+  --model_type $MODEL_TYPE \
+  --tp_size $TP_SIZE \
+  --world_size $TP_SIZE \
+  --seq_size_per_block 64 \
+  --concurrency_limit 16 \
+  --think_mode ${THINK_MODE:-1} \
+  --warm_up 0 \
+  2>&1 | tee ./logs/tp.log
+```
+
+Health: `curl -sS --max-time 5 http://localhost:8088/health`
+
+**Notes:**
+- XCCL init can be flaky — if the server hangs at barrier during startup, kill and retry.
+- The first startup may be slower due to XCCL communicator initialization across devices.
+
+---
+
+## Mode C: PD Disaggregation (2 XPUs, e.g., ZE_AFFINITY_MASK=2,3)
 
 Parse device IDs: split `ZE_AFFINITY_MASK` on comma → `PREFILL_DEVICE` (first), `DECODE_DEVICE` (second).
 Example: `ZE_AFFINITY_MASK=2,3` → `PREFILL_DEVICE=2`, `DECODE_DEVICE=3`.
@@ -183,6 +212,7 @@ POST body for `/v1/chat/completions`:
 
 | Arg | Purpose | Default | Notes |
 |-----|---------|---------|-------|
+| `--world_size` | Total number of processes | 1 | Set to `TP_SIZE` for TP mode |
 | `--role_type` | `PREFILL` / `DECODE` / unset | unset | Required for PD |
 | `--seq_size_per_block` | KV cache page size | 64 | Smaller → less fragmentation |
 | `--concurrency_limit` | Max parallel requests | 8 | Raise to 16/64 for PD |
@@ -212,5 +242,5 @@ curl -sS http://localhost:8088/v1/chat/completions \
 ```
 
 ## Output
-- Report: which mode launched (standard/PD), device IDs used, both ports healthy (if PD), smoke test PASS/FAIL
+- Report: which mode launched (standard/TP/PD), device IDs used, TP_SIZE (if TP), both ports healthy (if PD), smoke test PASS/FAIL
 - Leave servers running for subsequent benchmark / accuracy skills
