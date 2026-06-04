@@ -8,6 +8,11 @@ config_setting(
     values = {"define": "using_rocm=true"},
 )
 
+config_setting(
+    name = "using_xpu",
+    values = {"define": "using_xpu=true"},
+)
+
 cc_library(
     name = "torch",
     srcs = [
@@ -46,6 +51,10 @@ cc_library(
             # "torch/lib/libhip*.so*",
             # "torch/lib/lib*amd*.so*",
         ]),
+        ":using_xpu": [
+            "torch/lib/libtorch_xpu.so",
+            "torch/lib/libc10_xpu.so",
+        ],
         "//conditions:default": [],
     }),
     hdrs = glob([

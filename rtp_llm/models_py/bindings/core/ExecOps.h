@@ -58,7 +58,7 @@ void cudaProfilerEnd();
 // ===================================================================
 
 ExecStatus    getGpuExecStatus();
-torch::Device getTorchCudaDevice();
+torch::Device getTorchDevice();
 void          setTraceMemory(bool trace_memory);
 
 // ===================================================================
@@ -81,7 +81,7 @@ void fusedStridedCopy(const FusedStridedCopyParams& params);
 // ===================================================================
 
 GreedyOutput     execSampleGreedy(const GreedyParams& params);
-BeamSearchOutput execSampleBeamSearch(BeamSearchParams params);
+BeamSearchOutput execSampleBeamSearch(const BeamSearchParams& params);
 void             execChainSpeculativeSampling(const SpeculativeSamplingParams& params);
 
 // ===================================================================

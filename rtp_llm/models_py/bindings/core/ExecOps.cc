@@ -20,6 +20,9 @@
 #include <c10/cuda/CUDAGuard.h>
 #elif USING_ROCM
 #include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
+#elif USING_XPU
+#include <ATen/xpu/XPUContext.h>
+#include <c10/xpu/XPUCachingAllocator.h>
 #endif
 #include <pybind11/functional.h>
 
@@ -31,7 +34,7 @@ using DeviceGuard = c10::hip::HIPGuardMasqueradingAsCUDA;
 
 namespace rtp_llm {
 GreedyOutput     sampleGreedy(const GreedyParams& params);
-BeamSearchOutput sampleBeamSearch(BeamSearchParams params);
+BeamSearchOutput sampleBeamSearch(const BeamSearchParams& params);
 void             chainSpeculativeSampling(const SpeculativeSamplingParams& params);
 void             multiMergeCopy(const MultiMergeCopyParams& params);
 }  // namespace rtp_llm
@@ -97,6 +100,12 @@ void runtimeSyncAndCheck() {
     check_cuda_error();
 }
 
+#elif USING_XPU
+
+void runtimeSyncAndCheck() {
+    // XPU: synchronize via PyTorch; no direct runtime API needed in C++.
+}
+
 #else  // ROCm
 
 void runtimeSyncAndCheck() {
@@ -115,6 +124,14 @@ void runtimeSyncAndCheck() {
 std::shared_ptr<torch::Event> runtimeCreateEvent() {
     auto event = std::make_shared<torch::Event>(torch::kCUDA);
     event->record(at::cuda::getCurrentCUDAStream());
+    return event;
+}
+
+#elif USING_XPU
+
+std::shared_ptr<torch::Event> runtimeCreateEvent() {
+    auto event = std::make_shared<torch::Event>(torch::kXPU);
+    event->record(c10::xpu::getCurrentXPUStream());
     return event;
 }
 
@@ -303,6 +320,14 @@ torch::Tensor preprocessGemmWeightByKey(const std::string& key, torch::Tensor we
 torch::Tensor preprocessWeightScale(torch::Tensor weight, torch::Tensor scale) {
     return weight;
 }
+#elif USING_XPU
+torch::Tensor preprocessGemmWeightByKey(const std::string& key, torch::Tensor weight, bool user_arm_gemm_use_kai) {
+    return weight;
+}
+
+torch::Tensor preprocessWeightScale(torch::Tensor weight, torch::Tensor scale) {
+    return weight;
+}
 #endif
 
 // ============================================================
@@ -321,6 +346,8 @@ void cudaCheckLastError() {
     if (err != hipSuccess) {
         RTP_LLM_LOG_ERROR("ROCm error: %s", hipGetErrorString(err));
     }
+#elif USING_XPU
+    // XPU: error checking handled by PyTorch XPU runtime.
 #endif
 }
 
@@ -331,6 +358,8 @@ void cudaPreRun(int device_id) {
     at::cuda::setCurrentCUDAStream(at::cuda::getDefaultCUDAStream(device_id));
 #elif USING_ROCM
     hipSetDevice(device_id);
+#elif USING_XPU
+    // XPU: device selection handled by PyTorch XPU runtime (torch.xpu.set_device).
 #endif
 }
 
@@ -358,6 +387,14 @@ ExecStatus getGpuExecStatus() {
     RTP_LLM_CHECK(error == cudaSuccess);
 #elif USING_ROCM
     hipMemGetInfo(&mem.free_bytes, &total_bytes);
+#elif USING_XPU
+    {
+        auto* props = at::xpu::getDeviceProperties(0);
+        total_bytes = props->global_mem_size;
+        auto stats = c10::xpu::XPUCachingAllocator::getDeviceStats(0);
+        size_t used = stats.allocated_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].current;
+        mem.free_bytes = (total_bytes > used) ? (total_bytes - used) : 0;
+    }
 #endif
     mem.used_bytes      = total_bytes - mem.free_bytes;
     mem.available_bytes = mem.free_bytes;
@@ -366,8 +403,12 @@ ExecStatus getGpuExecStatus() {
     return status;
 }
 
-torch::Device getTorchCudaDevice() {
+torch::Device getTorchDevice() {
+#if USING_XPU
+    return torch::Device(torch::kXPU);
+#else
     return torch::Device(torch::kCUDA);
+#endif
 }
 
 namespace {
@@ -419,8 +460,8 @@ GreedyOutput execSampleGreedy(const GreedyParams& params) {
     return sampleGreedy(params);
 }
 
-BeamSearchOutput execSampleBeamSearch(BeamSearchParams params) {
-    return sampleBeamSearch(std::move(params));
+BeamSearchOutput execSampleBeamSearch(const BeamSearchParams& params) {
+    return sampleBeamSearch(params);
 }
 
 void execChainSpeculativeSampling(const SpeculativeSamplingParams& params) {
@@ -503,9 +544,9 @@ OverallExpertStats execCreateMoeExpertStates(const ExpertStatsParams& params) {
     states.log_exp_num             = params.log_exp_num;
     states.phy_exp_num             = params.phy_exp_num;
     states.stats_buf.log_stats_buf = torch::zeros({(int64_t)params.layer_num, (int64_t)params.log_exp_num},
-                                                  torch::TensorOptions(torch::kInt32).device(torch::kCUDA));
+                                                  torch::TensorOptions(torch::kInt32).device(getTorchDevice()));
     states.stats_buf.gpu_loads_buf = torch::zeros({(int64_t)params.layer_num, (int64_t)params.ep_size},
-                                                  torch::TensorOptions(torch::kInt32).device(torch::kCUDA));
+                                                  torch::TensorOptions(torch::kInt32).device(getTorchDevice()));
     return states;
 }
 
@@ -551,6 +592,9 @@ MlaOpsType initRuntime(size_t device_id, bool trace_memory, bool enable_comm_ove
 #elif USING_ROCM
         RTP_LLM_LOG_INFO("Initialize runtime (ROCm). device_id=%zu", device_id);
         ROCM_CHECK(hipSetDevice(device_id));
+#elif USING_XPU
+        RTP_LLM_LOG_INFO("Initialize runtime (XPU/Intel GPU). device_id=%zu", device_id);
+        // XPU device selection is handled by PyTorch (torch.xpu.set_device).
 #endif
 
         g_enable_comm_overlap = enable_comm_overlap;

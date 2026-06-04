@@ -100,7 +100,7 @@ absl::StatusOr<SamplerInputs> MtpBatchStreamProcessor::gatherSpecSamplerInput(
     auto vocab_size = (size_t)model_output.logits.size(1);
     if (return_all_probs) {
         sampler_inputs.all_probs = torch::zeros({(int64_t)total_batch_size, (int64_t)vocab_size},
-                                                torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
+                                                torch::TensorOptions().dtype(torch::kFloat32).device(getTorchDevice()));
     }
 
     sampler_inputs.logits = model_output.logits.clone();
@@ -385,7 +385,7 @@ void MtpBatchStreamProcessor::preparePrefillSpecUpdateInfo(const StreamGroups&  
 
         // speculative decoding info
         torch::Tensor propose_all_probs =
-            draft_sampler_output.all_probs.narrow(0, batch_idx_out, next_batch_size).to(torch::kCUDA).clone();
+            draft_sampler_output.all_probs.narrow(0, batch_idx_out, next_batch_size).to(getTorchDevice()).clone();
 
         torch::Tensor last_hidden_states;
         if (propose_step_ > 1) {
@@ -421,7 +421,7 @@ void MtpBatchStreamProcessor::prepareDecodeSpecUpdateInfo(
 
         // speculative decoding info
         torch::Tensor propose_all_probs =
-            draft_sampler_output.all_probs.narrow(0, batch_idx_out, next_batch_size).to(torch::kCUDA).clone();
+            draft_sampler_output.all_probs.narrow(0, batch_idx_out, next_batch_size).to(getTorchDevice()).clone();
 
         torch::Tensor last_hidden_states;
         if (propose_step_ > 1) {
@@ -474,7 +474,7 @@ void MtpBatchStreamProcessor::gatherHiddenStates(const StreamGroups& stream_grou
         all_hidden_states = all_streams.front()->getSPOutputBuffer()->hidden_states;
     } else if (all_streams.size() < 8) {
         all_hidden_states = torch::empty({(int64_t)all_hidden_tokens_num, (int64_t)hidden_size},
-                                         torch::TensorOptions().dtype(dtype).device(torch::kCUDA));
+                                         torch::TensorOptions().dtype(dtype).device(getTorchDevice()));
         size_t index      = 0;
         for (auto& stream : all_streams) {
             auto  sp_output_buffer = stream->getSPOutputBuffer();
@@ -485,7 +485,7 @@ void MtpBatchStreamProcessor::gatherHiddenStates(const StreamGroups& stream_grou
         }
     } else {
         all_hidden_states = torch::empty({(int64_t)all_hidden_tokens_num, (int64_t)hidden_size},
-                                         torch::TensorOptions().dtype(dtype).device(torch::kCUDA));
+                                         torch::TensorOptions().dtype(dtype).device(getTorchDevice()));
 
         MultiMergeCopyParams params;
         params.dst_ptr         = all_hidden_states.data_ptr();

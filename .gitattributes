@@ -5,3 +5,6 @@
 *.bin binary
 *.model binary
 *.safetensors binary
+
+# Force LF for XPU/GPU toolchain scripts — prevent CRLF shebang breakage on Linux
+3rdparty/gpus/**        text eol=lf

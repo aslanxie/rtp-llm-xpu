@@ -4,6 +4,16 @@
 #include "rtp_llm/cpp/utils/TimeUtil.h"
 #include <torch/torch.h>
 
+namespace {
+#if USING_ROCM
+constexpr c10::DeviceType kCacheStoreGpuDevice = torch::kCUDA;
+#elif USING_XPU
+constexpr c10::DeviceType kCacheStoreGpuDevice = torch::kXPU;
+#else
+constexpr c10::DeviceType kCacheStoreGpuDevice = torch::kCUDA;
+#endif
+}
+
 namespace rtp_llm {
 
 RequestBlockBufferStore::RequestBlockBufferStore(const std::shared_ptr<MemoryUtil>& memory_util):
@@ -183,11 +193,11 @@ bool RequestBlockBufferStore::copyBlock(const std::shared_ptr<BlockBuffer>& dst_
         {torch::from_blob(
              dst_block->addr.get(),
              {(int64_t)dst_block->len},
-             torch::TensorOptions().dtype(torch::kUInt8).device(dst_block->gpu_mem ? torch::kCUDA : torch::kCPU)),
+             torch::TensorOptions().dtype(torch::kUInt8).device(dst_block->gpu_mem ? kCacheStoreGpuDevice : torch::kCPU)),
          torch::from_blob(
              src_block->addr.get(),
              {(int64_t)src_block->len},
-             torch::TensorOptions().dtype(torch::kUInt8).device(src_block->gpu_mem ? torch::kCUDA : torch::kCPU))});
+             torch::TensorOptions().dtype(torch::kUInt8).device(src_block->gpu_mem ? kCacheStoreGpuDevice : torch::kCPU))});
     return true;
 }
 

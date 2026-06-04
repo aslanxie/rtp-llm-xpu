@@ -14,11 +14,7 @@
  * limitations under the License.
  */
 
-#if USING_ROCM
-#include <hip/hip_fp16.h>
-#else
 #include <cuda_fp16.h>
-#endif
 
 #include "beamSearchKernels.h"
 
