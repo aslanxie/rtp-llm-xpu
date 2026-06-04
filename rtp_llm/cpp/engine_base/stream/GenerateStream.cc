@@ -2,9 +2,9 @@
 #include <cstddef>
 #include <memory>
 #include <ATen/Generator.h>
-#if USING_CUDA || USING_ROCM
+#if defined(USING_CUDA) || defined(USING_ROCM)
 #include <ATen/cuda/CUDAGeneratorImpl.h>
-#elif USING_XPU
+#elif defined(USING_XPU)
 #include <ATen/xpu/XPUGeneratorImpl.h>
 #endif
 #include "autil/EnvUtil.h"
@@ -91,9 +91,9 @@ GenerateStream::GenerateStream(const shared_ptr<GenerateInput>& input,
         generate_input_, init_batch_size, maxBatchSize(), special_tokens_.eos_token_id);
 
     if (generateConfig()->random_seed.has_value()) {
-#if USING_CUDA || USING_ROCM
+#if defined(USING_CUDA) || defined(USING_ROCM)
         generator_ = torch::make_generator<torch::CUDAGeneratorImpl>();
-#elif USING_XPU
+#elif defined(USING_XPU)
         generator_ = torch::make_generator<at::XPUGeneratorImpl>();
 #else
         generator_ = torch::make_generator<torch::CPUGeneratorImpl>();

@@ -118,7 +118,7 @@ torch_ext::PyAttentionInputs PyWrappedModel::buildPyAttentionInputs(const GptMod
     RTP_LLM_CHECK_WITH_INFO(context_batch_size == 0 || decode_batch_size == 0,
                             "PyWrappedModel received a mixed prefill+decode batch which is not supported: "
                             "context_batch_size[%ld] decode_batch_size[%ld]. The scheduler must keep prefill and "
-                            "decode batches separate for py_model.",
+                            "decode batches separate when load_python_model is enabled.",
                             context_batch_size,
                             decode_batch_size);
 
