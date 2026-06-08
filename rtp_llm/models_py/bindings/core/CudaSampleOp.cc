@@ -291,6 +291,11 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
     const auto step              = params.step;
     auto       device            = getTorchDevice();  // returns torch::kXPU
 
+    // Verify sampling parameters are on CPU (constructed by SamplerInputGatherer)
+    RTP_LLM_CHECK(params.temperature.is_cpu());
+    RTP_LLM_CHECK(params.top_k.is_cpu());
+    RTP_LLM_CHECK(params.top_p.is_cpu());
+
     // [batch_size, step + 1] -> GPU
     auto device_tokens     = params.token_ids.to(device);
     auto transposed_tokens = device_tokens.transpose(0, 1).contiguous();

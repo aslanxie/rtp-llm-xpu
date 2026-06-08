@@ -18,6 +18,8 @@
 #include <cstring>
 #endif
 
+#include "rtp_llm/cpp/utils/AssertUtils.h"
+
 namespace rtp_llm {
 
 void fusedCopy(const FusedD2DCopyParams& params) {
@@ -29,8 +31,10 @@ void fusedCopy(const FusedD2DCopyParams& params) {
     invokeFusedCopy(params, stream);
 #elif USING_XPU
     // XPU fallback: sequential async memcpy via SYCL queue
+    RTP_LLM_CHECK(params.num_copies >= 0);
     sycl::queue& queue = c10::xpu::getCurrentXPUStream();
     for (int i = 0; i < params.num_copies; ++i) {
+        RTP_LLM_CHECK(params.dst[i] != nullptr && params.src[i] != nullptr);
         queue.memcpy(params.dst[i], params.src[i], params.size[i]);
     }
     queue.wait();
@@ -48,8 +52,10 @@ void fusedStridedCopy(const FusedStridedCopyParams& params) {
     invokeFusedStridedCopy(params, stream);
 #elif USING_XPU
     // XPU fallback: sequential async strided memcpy via SYCL queue
+    RTP_LLM_CHECK(params.num_copies >= 0);
     sycl::queue& queue = c10::xpu::getCurrentXPUStream();
     for (int i = 0; i < params.num_copies; ++i) {
+        RTP_LLM_CHECK(params.dst[i] != nullptr && params.src[i] != nullptr);
         const char* src_base = static_cast<const char*>(params.src[i]);
         char*       dst_base = static_cast<char*>(params.dst[i]);
         for (size_t row = 0; row < params.num_rows[i]; ++row) {

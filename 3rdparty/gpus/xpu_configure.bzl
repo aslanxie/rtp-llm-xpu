@@ -360,6 +360,9 @@ py_runtime(
             "xpu/site_packages.bzl",
             'XPU_SITE_PACKAGES = "%s"\n' % site_packages,
         )
+    else:
+        # buildifier: disable=print
+        print("WARNING: site-packages detection failed for XPU: " + result.stderr)
 
 xpu_configure = repository_rule(
     implementation = _xpu_configure_impl,

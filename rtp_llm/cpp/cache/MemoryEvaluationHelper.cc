@@ -23,12 +23,12 @@ namespace rtp_llm {
 // Helper function to update memory size if below minimum requirement
 void MemoryEvaluationHelper::updateMemoryIfNeeded(size_t& current_size, size_t min_required, const char* scenario) {
     if (current_size < min_required) {
-        current_size = min_required;
         RTP_LLM_LOG_INFO("%s needs at least %ld MiB memory for runtime by default, "
                          "but only %ld MiB memory reserved. adjust to minimal value.",
                          scenario,
                          min_required / 1024 / 1024,
                          current_size / 1024 / 1024);
+        current_size = min_required;
     }
 }
 

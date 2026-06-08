@@ -20,6 +20,9 @@
 #include "rtp_llm/models_py/bindings/core/DeviceData.h"
 #include "rtp_llm/models_py/bindings/core/ExecOps.h"
 #include "rtp_llm/models_py/bindings/core/CacheStoreAsyncWriter.h"
+#if USING_XPU
+#include <c10/xpu/XPUStream.h>
+#endif
 
 namespace py = pybind11;
 
@@ -125,6 +128,8 @@ inline PyWrappedModel::PyWrappedModel(const GptModelInitParams& params,
         auto residual_tensor = torch::tensor({(float)description_.residual_scalar}, torch::kFloat32).to(getTorchDevice());
 #if USING_CUDA
         c10::cuda::getCurrentCUDAStream().synchronize();
+#elif USING_XPU
+        c10::xpu::getCurrentXPUStream().synchronize();
 #endif
         residual_scale_fp32_ = residual_tensor;
         residual_scale_      = residual_tensor.to(dataTypeToTorchType(description_.data_type));
