@@ -227,7 +227,10 @@ build:xpu --copt="-Wno-array-parameter"
 build:xpu --copt="-Wno-array-bounds"
 build:xpu --copt="-Wno-error"
 build:xpu --host_copt="-Wno-error"
-build:xpu --action_env PYTHON_BIN_PATH="/opt/venv/bin/python3"
+# XPU uses the global PYTHON_BIN_PATH (/opt/conda310/bin/python3).
+# In the XPU Docker image, /opt/conda310/bin/python3 is symlinked to
+# /opt/venv/bin/python3 (Python 3.12). The .bzl repo rules detect the
+# venv site-packages by walking the symlink chain.
 build:xpu --python_top=@local_config_xpu//:python_runtime
 build:xpu --action_env LD_LIBRARY_PATH="/lib64:/usr/lib/x86_64-linux-gnu/:/opt/intel/oneapi/compiler/latest/lib:/opt/intel/oneapi/compiler/latest/opt/compiler/lib"
 build:xpu --host_action_env LD_LIBRARY_PATH="/lib64:/usr/lib/x86_64-linux-gnu/:/opt/intel/oneapi/compiler/latest/lib:/opt/intel/oneapi/compiler/latest/opt/compiler/lib"

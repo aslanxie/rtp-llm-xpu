@@ -9,6 +9,23 @@ site-packages directory, detected automatically from the Python interpreter
 on PATH or via `PYTHON_BIN_PATH`.
 """
 
+def _resolve_venv_python(repository_ctx, python_bin):
+    """Resolve a possibly-symlinked python to the actual venv python.
+
+    When PYTHON_BIN_PATH points to a symlink (e.g. /opt/conda310/bin/python3 ->
+    /opt/venv/bin/python3), Python doesn't activate the venv because pyvenv.cfg
+    isn't found relative to the invoked path. This walks the symlink chain to
+    find the first python whose parent directory contains pyvenv.cfg.
+    Falls back to the original path if no venv is found.
+    """
+    result = repository_ctx.execute([
+        python_bin, "-c",
+        "import os, sys\npath = sys.executable\nfor _ in range(10):\n    if os.path.islink(path):\n        t = os.readlink(path)\n        if not os.path.isabs(t): t = os.path.join(os.path.dirname(path), t)\n        path = os.path.normpath(t)\n        p = os.path.dirname(os.path.dirname(path))\n        if os.path.isfile(os.path.join(p, 'pyvenv.cfg')):\n            print(path); raise SystemExit\n    else: break\nprint(sys.executable)",
+    ])
+    if result.return_code == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    return python_bin
+
 def _torch_xpu_configure_impl(repository_ctx):
     # Check if XPU torch is actually available; if not, create a dummy repo
     # so CUDA/ROCm builds don't fail.
@@ -20,6 +37,9 @@ def _torch_xpu_configure_impl(repository_ctx):
             repository_ctx.file("BUILD.bazel", "# dummy torch_xpu repo (no python3 found)\n")
             return
         python_bin = str(python_bin)
+
+    # Resolve symlinked python to venv python so import torch works
+    python_bin = _resolve_venv_python(repository_ctx, python_bin)
 
     # Check if torch.xpu is available in this Python
     check = repository_ctx.execute([
