@@ -312,7 +312,9 @@ def _xpu_configure_impl(repository_ctx):
         repository_ctx.symlink(sycl_lib, "xpu/lib/libsycl.so")
         xpu_build_substitutions["%{sycl_runtime_srcs}"] = '["xpu/lib/libsycl.so"]'
     else:
-        xpu_build_substitutions["%{sycl_runtime_srcs}"] = "[]"
+        auto_configure_fail(
+            ("TF_NEED_XPU=1 but libsycl.so not found at %s. " +
+            "Is the oneAPI DPC++ compiler installed correctly?") % sycl_lib)
 
     if ze_loader_lib:
         repository_ctx.symlink(ze_loader_lib, "xpu/lib/libze_loader.so")
@@ -326,6 +328,10 @@ def _xpu_configure_impl(repository_ctx):
     sycl_include = oneapi_compiler_dir + "/include"
     if repository_ctx.path(sycl_include + "/sycl").exists:
         repository_ctx.symlink(sycl_include, "xpu/include")
+    else:
+        auto_configure_fail(
+            ("TF_NEED_XPU=1 but SYCL headers not found at %s/sycl. " +
+            "Is the oneAPI DPC++ compiler installed correctly?") % sycl_include)
 
     _tpl(repository_ctx, "xpu:BUILD", xpu_build_substitutions)
 

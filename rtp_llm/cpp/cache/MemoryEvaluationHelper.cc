@@ -64,9 +64,10 @@ size_t MemoryEvaluationHelper::getDefaultRuntimeMemorySize(const RuntimeConfig& 
     ROCM_CHECK(hipMemGetInfo(&free_gpu_bytes, &total_gpu_bytes));
 #elif USING_XPU
     {
-        auto* props = at::xpu::getDeviceProperties(0);
+        auto device_idx = static_cast<c10::DeviceIndex>(c10::xpu::current_device());
+        auto* props = at::xpu::getDeviceProperties(device_idx);
         total_gpu_bytes = props->global_mem_size;
-        auto stats = c10::xpu::XPUCachingAllocator::getDeviceStats(0);
+        auto stats = c10::xpu::XPUCachingAllocator::getDeviceStats(device_idx);
         size_t used = stats.allocated_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].current;
         free_gpu_bytes = (total_gpu_bytes > used) ? (total_gpu_bytes - used) : 0;
     }
