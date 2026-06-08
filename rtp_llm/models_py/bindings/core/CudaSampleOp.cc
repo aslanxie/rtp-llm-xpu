@@ -295,6 +295,28 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
     auto device_tokens     = params.token_ids.to(device);
     auto transposed_tokens = device_tokens.transpose(0, 1).contiguous();
 
+    // 0. Unsupported feature guard
+    if (params.no_repeat_ngram_size.has_value()) {
+        const auto& nrn = params.no_repeat_ngram_size.value();
+        if (std::any_of(nrn.data_ptr<int32_t>(),
+                        nrn.data_ptr<int32_t>() + batch_size,
+                        [](int32_t s) { return s != 0; })) {
+            RTP_LLM_CHECK_WITH_INFO(false,
+                "no_repeat_ngram_size is not yet supported on XPU. "
+                "Set no_repeat_ngram_size=0 when running on Intel GPU.");
+        }
+    }
+
+    // 0.5 do_sample: when do_sample=false, force top_k=1 to use argmax path
+    if (params.do_sample.has_value()) {
+        auto top_k_ptr = params.top_k.data_ptr<int32_t>();
+        for (int64_t b = 0; b < batch_size; b++) {
+            if (!params.do_sample.value().data_ptr<bool>()[b]) {
+                top_k_ptr[b] = 1;
+            }
+        }
+    }
+
     // 1. Temperature
     if (std::any_of(params.temperature.data_ptr<float>(),
                     params.temperature.data_ptr<float>() + batch_size,
@@ -361,6 +383,11 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
         auto samples_t = transposed_tokens.slice(0, step, step + 1).squeeze(0);
         auto selected  = torch::argmax(params.logits, -1, false);
         samples_t.copy_(selected);
+        if (params.cum_log_probs.has_value()) {
+            auto probs = torch::softmax(params.logits, -1);
+            auto token_prob = probs.gather(1, selected.unsqueeze(-1).to(torch::kLong)).squeeze(1);
+            params.cum_log_probs.value().add_(token_prob.log());
+        }
         params.token_ids.copy_(transposed_tokens.transpose(0, 1).contiguous());
         return GreedyOutput{};
     }
@@ -428,7 +455,8 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
 
     // 8. Update cum_log_probs
     if (params.cum_log_probs.has_value()) {
-        params.cum_log_probs.value().add_(probs_t.log());
+        auto token_prob = filtered_probs.gather(1, selected.unsqueeze(-1).to(torch::kLong)).squeeze(1);
+        params.cum_log_probs.value().add_(token_prob.log());
     }
 
     // 9. Copy back
