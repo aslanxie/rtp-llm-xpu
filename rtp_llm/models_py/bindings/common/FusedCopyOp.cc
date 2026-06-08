@@ -33,6 +33,7 @@ void fusedCopy(const FusedD2DCopyParams& params) {
     for (int i = 0; i < params.num_copies; ++i) {
         queue.memcpy(params.dst[i], params.src[i], params.size[i]);
     }
+    queue.wait();
 #else
     throw std::runtime_error("No supported GPU backend found for fusedCopy");
 #endif
@@ -58,6 +59,7 @@ void fusedStridedCopy(const FusedStridedCopyParams& params) {
                 params.row_bytes[i]);
         }
     }
+    queue.wait();
 #else
     throw std::runtime_error("No supported GPU backend found for fusedStridedCopy");
 #endif

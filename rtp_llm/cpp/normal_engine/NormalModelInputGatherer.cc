@@ -132,7 +132,7 @@ void gatherMultimodalFeaturesForContextBatch(const GenerateStreamPtr&    stream,
         ctx.mm_feature_index++;
     }
     for (auto& mm_feature : mm_features) {
-        if (!mm_feature.is_cuda()) {
+        if (mm_feature.device() != getTorchDevice()) {
             gathered_mm_features.emplace_back(mm_feature.to(getTorchDevice()));
         } else {
             gathered_mm_features.emplace_back(mm_feature);

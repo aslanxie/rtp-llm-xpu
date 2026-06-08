@@ -23,6 +23,7 @@
 #elif USING_XPU
 #include <ATen/xpu/XPUContext.h>
 #include <c10/xpu/XPUCachingAllocator.h>
+#include <c10/xpu/impl/XPUGuardImpl.h>
 #endif
 #include <pybind11/functional.h>
 
@@ -30,6 +31,8 @@
 using DeviceGuard = at::cuda::CUDAGuard;
 #elif USING_ROCM
 using DeviceGuard = c10::hip::HIPGuardMasqueradingAsCUDA;
+#elif USING_XPU
+using DeviceGuard = c10::DeviceGuard;
 #endif
 
 namespace rtp_llm {
@@ -103,7 +106,7 @@ void runtimeSyncAndCheck() {
 #elif USING_XPU
 
 void runtimeSyncAndCheck() {
-    // XPU: synchronize via PyTorch; no direct runtime API needed in C++.
+    c10::xpu::getCurrentXPUStream().synchronize();
 }
 
 #else  // ROCm
@@ -359,7 +362,7 @@ void cudaPreRun(int device_id) {
 #elif USING_ROCM
     hipSetDevice(device_id);
 #elif USING_XPU
-    // XPU: device selection handled by PyTorch XPU runtime (torch.xpu.set_device).
+    c10::xpu::set_device(static_cast<c10::DeviceIndex>(device_id));
 #endif
 }
 
@@ -389,9 +392,9 @@ ExecStatus getGpuExecStatus() {
     hipMemGetInfo(&mem.free_bytes, &total_bytes);
 #elif USING_XPU
     {
-        auto* props = at::xpu::getDeviceProperties(0);
+        auto* props = at::xpu::getDeviceProperties(g_device_id);
         total_bytes = props->global_mem_size;
-        auto stats = c10::xpu::XPUCachingAllocator::getDeviceStats(0);
+        auto stats = c10::xpu::XPUCachingAllocator::getDeviceStats(g_device_id);
         size_t used = stats.allocated_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].current;
         mem.free_bytes = (total_bytes > used) ? (total_bytes - used) : 0;
     }
