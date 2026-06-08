@@ -96,6 +96,8 @@ def _impl(ctx):
         ],
     )
 
+    # Not enabled globally — only needed for SYCL kernel sources.
+    # Enable per-target: cc_library(features = ["xpu_sycl_compile"])
     xpu_sycl_compile_feature = feature(
         name = "xpu_sycl_compile",
         flag_sets = [
@@ -287,7 +289,7 @@ cc_toolchain_config = rule(
         "host_compiler_warnings": attr.string_list(),
         "host_unfiltered_compile_flags": attr.string_list(),
         "builtin_include_directories": attr.string_list(),
-	"extra_no_canonical_prefixes_flags": attr.string_list(),
+        "extra_no_canonical_prefixes_flags": attr.string_list(),
         "host_compiler_path": attr.string(),
         "host_compiler_prefix": attr.string(),
         "linker_bin_path": attr.string(default = "/usr/bin"),

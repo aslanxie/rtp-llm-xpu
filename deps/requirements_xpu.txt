@@ -29,7 +29,7 @@ einops
 librosa
 
 # ---------- Core utilities ----------
-numpy>=1.25
+numpy<2.0a0,>=1.25
 pydantic>=2.0
 requests
 jinja2
@@ -63,7 +63,7 @@ timm
 
 # ---------- Misc ----------
 jieba
-sentence-transformers>=2.7.0
+sentence-transformers==2.7.0
 pybind11_stubgen
 py-spy
 thrift

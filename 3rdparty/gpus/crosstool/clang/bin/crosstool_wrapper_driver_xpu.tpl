@@ -45,6 +45,7 @@ _UNSUPPORTED_PREFIXES = (
 def _is_cpp(argv):
     """Heuristic: if we see -x c++ or a .cpp/.cc/.cxx source, use icpx."""
     for i, arg in enumerate(argv):
+        # 'cu' kept for robustness — inherited from CUDA wrapper pattern
         if arg == '-x' and i + 1 < len(argv) and argv[i + 1] in ('c++', 'cu'):
             return True
         if arg.endswith(('.cpp', '.cc', '.cxx', '.C')):

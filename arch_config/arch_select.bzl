@@ -13,6 +13,12 @@ _XPU_EXCLUDED_PACKAGES = [
     "xfastertransformer_devel_icx", "decord", "onnx", "bitsandbytes",
     "pyrsmi", "amdsmi", "fast-safetensors", "blobfile", "pyOpenSSL",
     "pyarrow", "pyodps", "matplotlib",
+    # CUDA/ROCm GPU kernel packages — not available for XPU
+    "apache-tvm-ffi", "flashinfer-python", "flashinfer-cubin",
+    "nvidia-cutlass-dsl", "flashinfer-jit-cache",
+    "fast-hadamard-transform", "flash-mla", "tilelang",
+    "deep_gemm", "deep_ep", "rtp-kernel",
+    "flash_attn", "flash-attn-3", "aiter",
 ]
 
 # Packages with different names in the XPU pip environment.
