@@ -2,10 +2,12 @@
 #include <cstddef>
 #include <memory>
 #include <ATen/Generator.h>
+#if defined(USING_CUDA) || defined(USING_ROCM)
 #if USING_CUDA || USING_ROCM
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #elif USING_XPU
 #include <ATen/xpu/XPUGeneratorImpl.h>
+#endif
 #endif
 #include "autil/EnvUtil.h"
 #include "rtp_llm/cpp/engine_base/stream/GenerateStream.h"
@@ -91,10 +93,8 @@ GenerateStream::GenerateStream(const shared_ptr<GenerateInput>& input,
         generate_input_, init_batch_size, maxBatchSize(), special_tokens_.eos_token_id);
 
     if (generateConfig()->random_seed.has_value()) {
-#if USING_CUDA || USING_ROCM
+#if defined(USING_CUDA) || defined(USING_ROCM)
         generator_ = torch::make_generator<torch::CUDAGeneratorImpl>();
-#elif USING_XPU
-        generator_ = torch::make_generator<at::XPUGeneratorImpl>();
 #else
         generator_ = torch::make_generator<torch::CPUGeneratorImpl>();
 #endif
@@ -323,16 +323,6 @@ int GenerateStream::initialReuseLength() const {
 
 void GenerateStream::setReuseLength(int reuse_length) {
     reuse_length_ = reuse_length;
-    if (generate_input_->mm_locs) {
-        auto& locs      = generate_input_->mm_locs.value();
-        auto* locs_data = locs.data_ptr<int32_t>();
-        for (int i = locs.numel() - 1; i >= 0; --i) {
-            if (reuse_length_ > locs_data[i]) {
-                reuse_mm_length_ = i + 1;
-                break;
-            }
-        }
-    }
 }
 
 void GenerateStream::setLocalReuseLength(int length) {
@@ -413,23 +403,39 @@ int GenerateStream::currentExecuteTokenSize() {
 
 std::vector<torch::Tensor> GenerateStream::multimodalFeatures() const {
     if (generate_input_->multimodal_features) {
-        auto& features = generate_input_->multimodal_features.value();
-        return std::vector<torch::Tensor>(features.begin() + reuse_mm_length_, features.end());
+        return generate_input_->multimodal_features.value();
     } else {
         return std::vector<torch::Tensor>();
     }
 }
 
+std::vector<torch::Tensor> GenerateStream::multimodalExtraInput() const {
+    if (generate_input_->mm_extra_input) {
+        return generate_input_->mm_extra_input.value();
+    }
+    return std::vector<torch::Tensor>();
+}
+
+bool GenerateStream::hasMultimodalExtraInput() const {
+    if (generate_input_->mm_extra_input) {
+        return generate_input_->mm_extra_input.value().size() > 0;
+    }
+    return false;
+}
+
 int GenerateStream::multimodalFeaturesLength() const {
-    return multimodalFeatures().size() * currentBatchSize();
+    if (generate_input_->multimodal_features) {
+        return generate_input_->multimodal_features.value().size() * currentBatchSize();
+    } else {
+        return 0;
+    }
 }
 
 torch::Tensor GenerateStream::multimodalLocations() const {
     if (!generate_input_->mm_locs) {
         return torch::Tensor();
     }
-    auto& mm_locs = generate_input_->mm_locs.value();
-    return mm_locs.slice(0, reuse_mm_length_, mm_locs.numel());
+    return generate_input_->mm_locs.value();
 }
 
 vector<int> GenerateStream::textTokensMask() const {

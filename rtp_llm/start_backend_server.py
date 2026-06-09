@@ -9,7 +9,7 @@ import sys
 import time
 import traceback
 from multiprocessing import Process
-from typing import List
+from typing import List, Optional
 
 import torch
 from rtp_llm.device.device_impl import gpu_is_available, gpu_device_count, get_visible_device_list
@@ -23,7 +23,6 @@ from rtp_llm.config.server_config_setup import (
     set_parallelism_config,
     setup_cuda_device_and_accl_env,
 )
-from rtp_llm.ops import VitSeparation
 from rtp_llm.utils.concurrency_controller import (
     ConcurrencyController,
     set_global_controller,
