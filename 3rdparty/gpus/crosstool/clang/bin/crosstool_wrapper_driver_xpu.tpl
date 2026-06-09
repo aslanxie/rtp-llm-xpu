@@ -125,6 +125,7 @@ def _process_params_files(argv):
                 tmp_files.append(tmp_path)
                 processed.append('@' + tmp_path)
             except IOError:
+                print('WARNING: failed to read params file: ' + params_file, file=sys.stderr)
                 processed.append(arg)
         else:
             processed.append(arg)
