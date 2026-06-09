@@ -13,6 +13,7 @@ from typing import List, Optional
 
 import torch
 from rtp_llm.device.device_impl import gpu_is_available, gpu_device_count, get_visible_device_list
+from rtp_llm.ops import VitSeparation
 from setproctitle import setproctitle
 
 CUR_PATH = os.path.dirname(os.path.abspath(__file__))

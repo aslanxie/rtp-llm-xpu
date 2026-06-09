@@ -327,16 +327,25 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
 
     // ── Embedding ───────────────────────────────────────────────────────────
     rtp_ops_m.def("embedding",
-                  [](at::Tensor& output,
-                     const at::Tensor& input,
-                     const at::Tensor& weight) {
+                  [](at::Tensor&                     output,
+                     const at::Tensor&               input,
+                     const at::Tensor&               weight,
+                     std::optional<at::Tensor>       position_ids,
+                     std::optional<at::Tensor>       token_type_ids,
+                     std::optional<at::Tensor>       text_tokens_mask) {
+                      // XPU plain embedding lookup; the optional position/token-type/
+                      // text-mask inputs are unused here (consumed by fused paths on
+                      // other backends) but accepted to match the common interface.
                       auto result = at::embedding(weight, input.to(at::kLong));
                       output.copy_(result.to(output.scalar_type()));
                   },
                   "Embedding lookup (PyTorch fallback on XPU)",
                   py::arg("output"),
                   py::arg("input"),
-                  py::arg("weight"));
+                  py::arg("weight"),
+                  py::arg("position_ids")     = std::nullopt,
+                  py::arg("token_type_ids")   = std::nullopt,
+                  py::arg("text_tokens_mask") = std::nullopt);
 
     // ── Embedding BERT ──────────────────────────────────────────────────────
     rtp_ops_m.def("embedding_bert",
