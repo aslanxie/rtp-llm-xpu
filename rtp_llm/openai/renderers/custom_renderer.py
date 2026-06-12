@@ -3,6 +3,7 @@ import functools
 import json
 import logging
 import os
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
@@ -46,6 +47,20 @@ from rtp_llm.utils.word_util import (
     is_truncated,
     truncate_response_with_stop_words,
 )
+
+# Per-request floor on generated tokens, threaded through asyncio Tasks via
+# ContextVar so concurrent requests cannot clobber each other's value. Read
+# by CustomChatRenderer._check_finish_reason; set per request at the top of
+# render_response_stream. Default 0 preserves prior behavior.
+_MIN_NEW_TOKENS_CV: ContextVar[int] = ContextVar("_min_new_tokens", default=0)
+
+
+def _bind_min_new_tokens(generate_config) -> Token:
+    """Bind min_new_tokens into task-scoped ContextVar; returns reset token."""
+    mnt = generate_config.min_new_tokens
+    if isinstance(mnt, list):
+        mnt = max(mnt) if mnt else 0
+    return _MIN_NEW_TOKENS_CV.set(int(mnt or 0))
 
 
 def _build_prompt_tokens_details(
@@ -979,6 +994,22 @@ class CustomChatRenderer:
         request: ChatCompletionRequest,
         generate_config: GenerateConfig,
     ) -> AsyncGenerator[StreamResponseObject, None]:
+        _min_new_tokens_token = _bind_min_new_tokens(generate_config)
+        try:
+            yield_gen = self._render_response_stream_body(
+                output_generator, request, generate_config
+            )
+            async for resp in yield_gen:
+                yield resp
+        finally:
+            _MIN_NEW_TOKENS_CV.reset(_min_new_tokens_token)
+
+    async def _render_response_stream_body(
+        self,
+        output_generator: AsyncGenerator[GenerateOutputs, None],
+        request: ChatCompletionRequest,
+        generate_config: GenerateConfig,
+    ) -> AsyncGenerator[StreamResponseObject, None]:
         stop_word_slice_list = get_stop_word_slices(generate_config.stop_words_str)
         nums_output = request.n if request.n is not None else 1
         # FIXME(zhangjianning.zjn): for variable width beam search,
@@ -1488,8 +1519,8 @@ class CustomChatRenderer:
                                 index=i,
                                 message=ChatMessage(
                                     role=choice.delta.role or RoleEnum.assistant,
-                                    content=content or None,
-                                    reasoning_content=reasoning_content or None,
+                                    content=content,
+                                    reasoning_content=reasoning_content,
                                     function_call=choice.delta.function_call or None,
                                 ),
                                 finish_reason=choice.finish_reason,
@@ -1503,14 +1534,11 @@ class CustomChatRenderer:
                     )
             else:
                 for i in range(len(all_choices)):
-                    if all_choices[i].message.content == None:
-                        all_choices[i].message.content = (
-                            response.choices[i].delta.content or None
-                        )
-                    else:
-                        all_choices[i].message.content += (
-                            response.choices[i].delta.content or ""
-                        )
+                    delta_content = response.choices[i].delta.content
+                    if all_choices[i].message.content is None:
+                        all_choices[i].message.content = delta_content
+                    elif delta_content is not None:
+                        all_choices[i].message.content += delta_content
                     content, reasoning_content = split_think_tag(
                         all_choices[i].message.content
                     )
@@ -1549,7 +1577,10 @@ class CustomChatRenderer:
         return chat_response.model_dump_json(exclude_none=True)
 
     def _check_finish_reason(
-        self, token_ids: List[int], input_token_length: int, max_new_tokens: int = -1
+        self,
+        token_ids: List[int],
+        input_token_length: int,
+        max_new_tokens: int = -1,
     ) -> Optional[FinisheReason]:
         stop_word_ids_list_all = (
             self.get_all_extra_stop_word_ids_list() + self.stop_words_id_list
@@ -1558,6 +1589,14 @@ class CustomChatRenderer:
             return FinisheReason.length
         if len(token_ids) + input_token_length >= self.max_seq_len:
             return FinisheReason.length
+        # min_new_tokens is a hard floor: do not terminate on EOS or stop-words
+        # before the requested minimum is generated. The length-based checks
+        # above still take precedence (max_new_tokens / max_seq_len). The value
+        # is read from a ContextVar set per-request in render_response_stream,
+        # which keeps the subclass _update_single_status signatures unchanged.
+        min_new_tokens = _MIN_NEW_TOKENS_CV.get()
+        if min_new_tokens > 0 and len(token_ids) < min_new_tokens:
+            return None
         if token_ids and token_ids[-1] == self.eos_token_id:
             return FinisheReason.stop
         for stop_word_ids in stop_word_ids_list_all:
@@ -1620,6 +1659,11 @@ class CustomChatRenderer:
                 if output_ids[i : i + stop_len] == stop_word_ids:
                     min_stop_pos = min(min_stop_pos, i)
                     break
+
+        # Respect min_new_tokens: do not truncate before the hard floor is met
+        min_new_tokens = _MIN_NEW_TOKENS_CV.get()
+        if min_new_tokens > 0 and min_stop_pos < min_new_tokens:
+            min_stop_pos = len(output_ids)
 
         # Truncate at earliest stop position found
         if min_stop_pos < len(output_ids):
