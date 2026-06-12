@@ -199,7 +199,8 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                      double eps,
                      double int8_min,
                      double int8_max,
-                     bool /*scale_ue8m0*/) {
+                     bool scale_ue8m0) {
+                      TORCH_CHECK(!scale_ue8m0, "per_token_group_quant_int8: scale_ue8m0=true is not yet supported on XPU.");
                       TORCH_CHECK(group_size > 0, "per_token_group_quant_int8: group_size must be > 0, got ", group_size);
                       auto float_input = input.to(at::kFloat);
                       auto shape = float_input.sizes().vec();
@@ -234,7 +235,8 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                      double eps,
                      double fp8_min,
                      double fp8_max,
-                     bool /*scale_ue8m0*/) {
+                     bool scale_ue8m0) {
+                      TORCH_CHECK(!scale_ue8m0, "per_token_group_quant_fp8: scale_ue8m0=true is not yet supported on XPU.");
                       TORCH_CHECK(group_size > 0, "per_token_group_quant_fp8: group_size must be > 0, got ", group_size);
                       auto float_input = input.to(at::kFloat);
                       auto shape = float_input.sizes().vec();
@@ -269,7 +271,7 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                      double eps,
                      double fp8_min,
                      double fp8_max,
-                     bool /*scale_ue8m0*/,
+                     bool scale_ue8m0,
                      bool fuse_silu_and_mul,
                      int64_t masked_m) {
                       at::Tensor actual_input;
@@ -286,6 +288,7 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                           masked_m, ", input rows=", input.size(0),
                           ") is not yet supported on XPU. "
                           "masked_m must be 0 or equal to input.size(0).");
+                      TORCH_CHECK(!scale_ue8m0, "per_token_group_quant_fp8_v2: scale_ue8m0=true is not yet supported on XPU.");
                       TORCH_CHECK(group_size > 0, "per_token_group_quant_fp8_v2: group_size must be > 0, got ", group_size);
                       auto float_input = actual_input.to(at::kFloat);
                       auto shape = float_input.sizes().vec();
