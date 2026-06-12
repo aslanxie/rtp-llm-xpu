@@ -253,6 +253,10 @@ def _xpu_configure_impl(repository_ctx):
 
     # Use icpx as the host compiler for getting include directories
     host_compiler_includes = get_cxx_inc_directories(repository_ctx, icpx_path)
+    if not host_compiler_includes:
+        auto_configure_fail(
+            "TF_NEED_XPU=1 but failed to detect include directories from " +
+            icpx_path + ". Verify icpx is installed and executes correctly.")
 
     host_compiler_prefix = "/usr/bin"
 
@@ -362,6 +366,11 @@ def _xpu_configure_impl(repository_ctx):
     # Symlink Python include dir and lib .so into the repo so Bazel glob() can
     # use package-relative paths (glob() rejects absolute paths).
     repository_ctx.symlink(python_include, "python_include")
+    if not repository_ctx.path(python_lib).exists:
+        auto_configure_fail(
+            "Python shared library not found at " + python_lib + ". " +
+            "Ensure PYTHON_BIN_PATH points to a Python built with --enable-shared " +
+            "or install the python3-dev / libpython3-dev package.")
     python_lib_basename = repository_ctx.path(python_lib).basename
     repository_ctx.symlink(python_lib, "python_lib/" + python_lib_basename)
 

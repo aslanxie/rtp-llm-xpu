@@ -200,9 +200,13 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                      double int8_min,
                      double int8_max,
                      bool /*scale_ue8m0*/) {
+                      TORCH_CHECK(group_size > 0, "per_token_group_quant_int8: group_size must be > 0, got ", group_size);
                       auto float_input = input.to(at::kFloat);
                       auto shape = float_input.sizes().vec();
                       int64_t last_dim = shape.back();
+                      TORCH_CHECK(last_dim % group_size == 0,
+                          "per_token_group_quant_int8: last_dim (", last_dim,
+                          ") must be divisible by group_size (", group_size, ")");
                       int64_t num_groups = last_dim / group_size;
                       auto reshaped = float_input.reshape({-1, num_groups, group_size});
                       auto abs_max = reshaped.abs().amax(-1, true).clamp_min(eps);
@@ -231,9 +235,13 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                      double fp8_min,
                      double fp8_max,
                      bool /*scale_ue8m0*/) {
+                      TORCH_CHECK(group_size > 0, "per_token_group_quant_fp8: group_size must be > 0, got ", group_size);
                       auto float_input = input.to(at::kFloat);
                       auto shape = float_input.sizes().vec();
                       int64_t last_dim = shape.back();
+                      TORCH_CHECK(last_dim % group_size == 0,
+                          "per_token_group_quant_fp8: last_dim (", last_dim,
+                          ") must be divisible by group_size (", group_size, ")");
                       int64_t num_groups = last_dim / group_size;
                       auto reshaped = float_input.reshape({-1, num_groups, group_size});
                       auto abs_max = reshaped.abs().amax(-1, true).clamp_min(eps);
@@ -278,9 +286,13 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                           masked_m, ", input rows=", input.size(0),
                           ") is not yet supported on XPU. "
                           "masked_m must be 0 or equal to input.size(0).");
+                      TORCH_CHECK(group_size > 0, "per_token_group_quant_fp8_v2: group_size must be > 0, got ", group_size);
                       auto float_input = actual_input.to(at::kFloat);
                       auto shape = float_input.sizes().vec();
                       int64_t last_dim = shape.back();
+                      TORCH_CHECK(last_dim % group_size == 0,
+                          "per_token_group_quant_fp8_v2: last_dim (", last_dim,
+                          ") must be divisible by group_size (", group_size, ")");
                       int64_t num_groups = last_dim / group_size;
                       auto reshaped = float_input.reshape({-1, num_groups, group_size});
                       auto abs_max = reshaped.abs().amax(-1, true).clamp_min(eps);
