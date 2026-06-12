@@ -466,7 +466,12 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                       score.masked_fill_(mask, -std::numeric_limits<float>::infinity());
                       auto topk_result = score.topk(k, -1);
                       score.narrow(-1, 0, k).copy_(std::get<0>(topk_result));
-                      indices.copy_(std::get<1>(topk_result).to(indices.scalar_type()));
+                      auto topk_idx = std::get<1>(topk_result);
+                      // Per CUDA semantics, fill positions beyond valid lengths with -1.
+                      auto k_idx = at::arange(k, topk_idx.options().dtype(at::kLong));
+                      auto out_mask = k_idx.unsqueeze(0) >= len_dev.unsqueeze(1);
+                      topk_idx.masked_fill_(out_mask, -1);
+                      indices.copy_(topk_idx.to(indices.scalar_type()));
                   },
                   "Fast TopK v2 (PyTorch fallback on XPU)",
                   py::arg("score"),

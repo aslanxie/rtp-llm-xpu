@@ -298,6 +298,10 @@ cc_library(
         "@//:using_xpu": [],
         "//conditions:default": [],
     }),
+    features = select({
+        "@//:using_xpu": ["xpu_sycl_compile"],
+        "//conditions:default": [],
+    }),
     copts = copts(),
     visibility = ["//visibility:public"],
     alwayslink = 1,
