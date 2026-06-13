@@ -474,13 +474,14 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                           "fast_topk_v2: ragged layout (row_starts) is not yet supported on XPU. "
                           "Only dense/paged layout is supported.");
                       int64_t k = indices.size(-1);
-                      // Mask out positions beyond valid lengths per row
-                      auto len_dev = lengths.to(score.device());
-                      auto col_idx = at::arange(score.size(-1), score.options());
+                      // Work on a copy so the caller's score tensor is not mutated;
+                      // fast_topk_v2 only produces indices (CUDA semantics).
+                      auto work = score.clone();
+                      auto len_dev = lengths.to(work.device());
+                      auto col_idx = at::arange(work.size(-1), work.options());
                       auto mask = col_idx.unsqueeze(0) >= len_dev.unsqueeze(1);
-                      score.masked_fill_(mask, -std::numeric_limits<float>::infinity());
-                      auto topk_result = score.topk(k, -1);
-                      score.narrow(-1, 0, k).copy_(std::get<0>(topk_result));
+                      work.masked_fill_(mask, -std::numeric_limits<float>::infinity());
+                      auto topk_result = work.topk(k, -1);
                       auto topk_idx = std::get<1>(topk_result);
                       // Per CUDA semantics, fill positions beyond valid lengths with -1.
                       auto k_idx = at::arange(k, topk_idx.options().dtype(at::kLong));
