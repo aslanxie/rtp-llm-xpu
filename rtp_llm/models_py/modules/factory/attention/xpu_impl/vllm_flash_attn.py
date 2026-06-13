@@ -266,6 +266,25 @@ def _flat_write_kv(cache, block_indices, offsets, k, v, tpb, H, D):
         cache_flat.index_put_((flat_idx_v,), v)
 
 
+def _assert_nshd_cache(cache, tpb, num_kv_heads, head_dim):
+    """Validate the LayerKVCache tensor is the XPU NSHD layout this module assumes.
+
+    Producer: KVCache::getLayerCache() in rtp_llm/models_py/bindings/OpDefs.h
+    (XPU branch) reshapes to [num_blocks, 2, seq_size_per_block, num_kv_heads,
+    head_dim]. The read/write helpers below index cache[block, k/v, seq_offset,
+    head, dim], so a divergent layout would silently corrupt KV. Fail loud.
+    """
+    shape = tuple(cache.shape)
+    if (cache.dim() != 5 or shape[1] != 2 or shape[2] != tpb
+            or shape[3] != num_kv_heads or shape[4] != head_dim):
+        raise RuntimeError(
+            "XPU KV cache layout mismatch: expected NSHD "
+            f"[num_blocks, 2, {tpb}, {num_kv_heads}, {head_dim}] but got {shape}. "
+            "The producer (OpDefs.h getLayerCache XPU branch) and this consumer "
+            "(vllm_flash_attn paged read/write) have diverged."
+        )
+
+
 def _write_to_paged_cache(k, v, kv_cache, block_ids_cpu, start_pos, num_kv_heads, head_dim):
     """Write k,v [N, kv_heads, dim] to paged LayerKVCache.
 
@@ -275,6 +294,7 @@ def _write_to_paged_cache(k, v, kv_cache, block_ids_cpu, start_pos, num_kv_heads
     """
     tpb = kv_cache.seq_size_per_block
     cache = kv_cache.kv_cache_base  # XPU flash layout: [num_blocks, 2, tpb, kv_heads, head_dim]
+    _assert_nshd_cache(cache, tpb, num_kv_heads, head_dim)
     bids = block_ids_cpu.reshape(-1)
     N = k.shape[0]
     if N == 0:
@@ -301,6 +321,7 @@ def _read_from_paged_cache(kv_cache, block_ids_cpu, total_len, num_kv_heads, hea
     """
     tpb = kv_cache.seq_size_per_block
     cache = kv_cache.kv_cache_base  # XPU flash layout: [num_blocks, 2, tpb, kv_heads, head_dim]
+    _assert_nshd_cache(cache, tpb, num_kv_heads, head_dim)
     bids = block_ids_cpu.reshape(-1)
     if total_len == 0:
         return cache.new_empty(0, num_kv_heads, head_dim), cache.new_empty(0, num_kv_heads, head_dim)
