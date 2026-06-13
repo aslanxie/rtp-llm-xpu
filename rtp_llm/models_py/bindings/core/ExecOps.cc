@@ -409,7 +409,7 @@ ExecStatus getGpuExecStatus() {
 
 torch::Device getTorchDevice() {
 #if USING_XPU
-    return torch::Device(torch::kXPU);
+    return torch::Device(torch::kXPU, static_cast<c10::DeviceIndex>(g_device_id));
 #else
     return torch::Device(torch::kCUDA);
 #endif
