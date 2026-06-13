@@ -16,4 +16,3 @@ def resolve_venv_python(repository_ctx, python_bin):
     if result.return_code == 0 and result.stdout.strip():
         return result.stdout.strip()
     return python_bin
-
