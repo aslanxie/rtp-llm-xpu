@@ -84,8 +84,12 @@ struct KVCache {
                                                               (int64_t)(kv_lora_rank + rope_head_dim)});
                 } else if (num_kv_heads > 0 && head_dim > 0) {
 #ifdef USING_XPU
-                    // XPU flash layout: [kernel_block_num, 2, kernel_seq_size_per_block, num_kv_heads, head_dim]
-                    // Allows paged flash attention with gather but no transpose.
+                    // XPU flash layout (NSHD): [kernel_block_num, 2, kernel_seq_size_per_block, num_kv_heads, head_dim]
+                    // Seq-before-head so paged flash attention can gather with no transpose.
+                    // SOLE CONSUMER: rtp_llm/models_py/modules/factory/attention/xpu_impl/vllm_flash_attn.py
+                    //   (_read_from_paged_cache / _write_to_paged_cache / XpuVllm{Prefill,Decode}Impl),
+                    //   which index cache[block, k/v, seq_offset, head, dim]. Keep this layout and that
+                    //   consumer in sync; covered by xpu_impl/test/test_kv_cache_layout.py.
                     layer_cache.kv_cache_base = base.reshape({kernel_block_num,
                                                               2,
                                                               (int64_t)kernel_seq_size_per_block,
