@@ -91,7 +91,10 @@ def _impl(ctx):
         flag_sets = [
             flag_set(
                 actions = all_link_actions,
-                flag_groups = [flag_group(flags = ["-fsycl", "-lze_loader"])],
+                # -L points the linker at the directory where libze_loader.so was
+                # probed (it may live in oneAPI's lib dir, not a default search
+                # path); see xpu_configure.bzl ze_loader probe.
+                flag_groups = [flag_group(flags = ["-fsycl", "-L%{ze_loader_lib_dir}", "-lze_loader"])],
             ),
         ],
     )

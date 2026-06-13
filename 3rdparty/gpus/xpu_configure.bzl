@@ -305,17 +305,10 @@ def _xpu_configure_impl(repository_ctx):
 
     _tpl(repository_ctx, "crosstool:BUILD", xpu_defines)
 
-    # Substitute SYCL target into toolchain config template
-    sycl_target = _get_sycl_target(repository_ctx)
-    _tpl(
-        repository_ctx,
-        "crosstool:xpu_cc_toolchain_config.bzl",
-        {"%{xpu_sycl_target}": sycl_target},
-        out = "crosstool/cc_toolchain_config.bzl",
-    )
-
-    # --- Generate xpu/BUILD with SYCL runtime libraries ---
-    sycl_lib = oneapi_compiler_dir + "/lib/libsycl.so"
+    # Probe for the Level Zero loader BEFORE generating the toolchain config so
+    # its directory can be handed to the linker as -L (the toolchain links
+    # -lze_loader unconditionally, and the loader may live in oneAPI's lib dir
+    # rather than a default linker search path). Fail fast if it is missing.
     ze_loader_lib = ""
     for path in ["/usr/lib/x86_64-linux-gnu/libze_loader.so",
                  "/usr/lib64/libze_loader.so",
@@ -323,6 +316,28 @@ def _xpu_configure_impl(repository_ctx):
         if repository_ctx.path(path).exists:
             ze_loader_lib = path
             break
+    if not ze_loader_lib:
+        auto_configure_fail(
+            "TF_NEED_XPU=1 but libze_loader.so not found. " +
+            "The XPU toolchain unconditionally links -lze_loader. " +
+            "Install the Level Zero loader (e.g. level-zero-devel) or " +
+            "ensure it is in /usr/lib/x86_64-linux-gnu/ or ONEAPI_ROOT/lib/.")
+    ze_loader_lib_dir = ze_loader_lib.rsplit("/", 1)[0]
+
+    # Substitute SYCL target and ze_loader search dir into toolchain config template
+    sycl_target = _get_sycl_target(repository_ctx)
+    _tpl(
+        repository_ctx,
+        "crosstool:xpu_cc_toolchain_config.bzl",
+        {
+            "%{xpu_sycl_target}": sycl_target,
+            "%{ze_loader_lib_dir}": ze_loader_lib_dir,
+        },
+        out = "crosstool/cc_toolchain_config.bzl",
+    )
+
+    # --- Generate xpu/BUILD with SYCL runtime libraries ---
+    sycl_lib = oneapi_compiler_dir + "/lib/libsycl.so"
 
     xpu_build_substitutions = {}
     if repository_ctx.path(sycl_lib).exists:
@@ -333,15 +348,8 @@ def _xpu_configure_impl(repository_ctx):
             ("TF_NEED_XPU=1 but libsycl.so not found at %s. " +
             "Is the oneAPI DPC++ compiler installed correctly?") % sycl_lib)
 
-    if ze_loader_lib:
-        repository_ctx.symlink(ze_loader_lib, "xpu/lib/libze_loader.so")
-        xpu_build_substitutions["%{ze_loader_srcs}"] = '["lib/libze_loader.so"]'
-    else:
-        auto_configure_fail(
-            "TF_NEED_XPU=1 but libze_loader.so not found. " +
-            "The XPU toolchain unconditionally links -lze_loader. " +
-            "Install the Level Zero loader (e.g. level-zero-devel) or " +
-            "ensure it is in /usr/lib/x86_64-linux-gnu/ or ONEAPI_ROOT/lib/.")
+    repository_ctx.symlink(ze_loader_lib, "xpu/lib/libze_loader.so")
+    xpu_build_substitutions["%{ze_loader_srcs}"] = '["lib/libze_loader.so"]'
 
     xpu_build_substitutions["%{copy_rules}"] = ""
 
