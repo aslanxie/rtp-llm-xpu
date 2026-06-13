@@ -211,6 +211,8 @@ BeamSearchOutput sampleBeamSearch(BeamSearchParams params) {
     // 8. Write newly selected tokens at the current step position
     //    (mirroring what the CUDA populateTokenIds kernel does)
     auto write_pos = sequence_lengths_out.to(torch::kLong).unsqueeze(-1);  // [batch, beam_out, 1]
+    // Guard against scattering past the allocated sequence dimension.
+    write_pos = write_pos.clamp(0, max_seq_len - 1);
     token_ids_out.scatter_(2, write_pos, output_ids.unsqueeze(-1));
 
     // 9. Increment sequence lengths (the CUDA stage-3 kernel does this internally)
