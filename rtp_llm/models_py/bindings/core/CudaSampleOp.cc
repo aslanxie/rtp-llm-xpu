@@ -478,8 +478,12 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
     bool has_top_k = !std::all_of(top_k_ptr, top_k_ptr + batch_size, [](uint32_t t) { return t <= 0; });
     if (has_top_k) {
         for (int64_t b = 0; b < batch_size; b++) {
-            int k = top_k_ptr[b] <= 0 ? vocab_size_padded : top_k_ptr[b];
-            if ((int64_t)k < vocab_size_padded) {
+            int64_t k = top_k_ptr[b] <= 0 ? vocab_size_padded : (int64_t)top_k_ptr[b];
+            // Clamp k into [1, vocab_size_padded] so an out-of-range top_k can
+            // never trigger an out-of-bounds topk() call.
+            if (k < 1) k = 1;
+            if (k > vocab_size_padded) k = vocab_size_padded;
+            if (k < vocab_size_padded) {
                 auto row                    = filtered_probs[b];
                 auto [topk_vals, topk_inds] = row.topk(k);
                 auto min_val                = topk_vals[-1];
