@@ -397,7 +397,24 @@ ExecStatus getGpuExecStatus() {
         total_bytes = props->global_mem_size;
         auto stats = c10::xpu::XPUCachingAllocator::getDeviceStats(device_idx);
         size_t reserved = stats.reserved_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].current;
-        mem.free_bytes = (total_bytes > reserved) ? (total_bytes - reserved) : 0;
+        size_t raw_free = (total_bytes > reserved) ? (total_bytes - reserved) : 0;
+        // Unlike cudaMemGetInfo, the XPU caching allocator only knows about memory
+        // this process reserved; it cannot observe memory held by the driver or by
+        // other processes/contexts on the same device. Withhold a conservative
+        // fraction of total memory so KV-cache sizing under-reports rather than
+        // over-allocating into space that is actually occupied externally. The
+        // ratio is overridable via XPU_MEM_RESERVE_RATIO (in [0, 1)); prefer
+        // setting kv_cache_mem_mb explicitly when exact control is required.
+        double reserve_ratio = 0.10;
+        const char* ratio_env = std::getenv("XPU_MEM_RESERVE_RATIO");
+        if (ratio_env != nullptr) {
+            double parsed = std::atof(ratio_env);
+            if (parsed >= 0.0 && parsed < 1.0) {
+                reserve_ratio = parsed;
+            }
+        }
+        size_t external_headroom = static_cast<size_t>(total_bytes * reserve_ratio);
+        mem.free_bytes = (raw_free > external_headroom) ? (raw_free - external_headroom) : 0;
     }
 #endif
     mem.used_bytes      = total_bytes - mem.free_bytes;
