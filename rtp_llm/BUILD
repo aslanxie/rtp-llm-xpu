@@ -713,6 +713,16 @@ rename_wheel(
     src = ":rtp_llm_whl",
 )
 
+# XPU wheels are built with the Python 3.12 interpreter (PyTorch XPU requires
+# ==3.12), so they must carry the cp312 tag instead of the default cp310 that
+# the CUDA/ROCm (Python 3.10) builds use. Build this target under --config=xpu.
+rename_wheel(
+    name = "rtp_llm_xpu",
+    package_name = "rtp_llm-%s" % RELEASE_VERSION,
+    src = ":rtp_llm_whl",
+    python_tag = "cp312",
+)
+
 rename_wheel(
     name = "rtp_llm_cuda12",
     package_name = "rtp_llm-%s+cuda121" % RELEASE_VERSION,
