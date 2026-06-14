@@ -102,6 +102,9 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                   [](at::Tensor& output,
                      const at::Tensor& input,
                      int64_t /*cuda_stream*/) {
+                      TORCH_CHECK(input.size(-1) % 2 == 0,
+                          "silu_and_mul: input last dim (", input.size(-1),
+                          ") must be even (gate|up layout).");
                       int64_t d = input.size(-1) / 2;
                       auto gate = input.narrow(-1, 0, d);
                       auto up   = input.narrow(-1, d, d);
@@ -273,7 +276,24 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                      double fp8_max,
                      bool scale_ue8m0,
                      bool fuse_silu_and_mul,
-                     int64_t masked_m) {
+                     py::object masked_m_obj) {
+                      // Accept both int and Tensor for masked_m to match CUDA API.
+                      int64_t masked_m = 0;
+                      if (!masked_m_obj.is_none()) {
+                          if (py::isinstance<py::int_>(masked_m_obj)) {
+                              masked_m = masked_m_obj.cast<int64_t>();
+                          } else {
+                              auto t = py::cast<at::Tensor>(masked_m_obj);
+                              if (t.numel() == 1) {
+                                  masked_m = t.item<int64_t>();
+                              } else if (t.numel() > 1) {
+                                  TORCH_CHECK(false,
+                                      "per_token_group_quant_fp8_v2: per-expert masked layout "
+                                      "(Tensor with numel > 1) is not yet supported on XPU. "
+                                      "Pass a scalar or int.");
+                              }
+                          }
+                      }
                       at::Tensor actual_input;
                       if (fuse_silu_and_mul) {
                           int64_t d = input.size(-1) / 2;
@@ -478,7 +498,7 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                       // fast_topk_v2 only produces indices (CUDA semantics).
                       auto work = score.clone();
                       auto len_dev = lengths.to(work.device());
-                      auto col_idx = at::arange(work.size(-1), work.options());
+                      auto col_idx = at::arange(work.size(-1), work.options().dtype(at::kLong));
                       auto mask = col_idx.unsqueeze(0) >= len_dev.unsqueeze(1);
                       work.masked_fill_(mask, -std::numeric_limits<float>::infinity());
                       auto topk_result = work.topk(k, -1);
