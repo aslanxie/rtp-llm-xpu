@@ -211,7 +211,9 @@ def _get_prefill_write_indices(bids_cpu, start_pos, N, tpb, device):
     """
     # Include content hash to avoid aliasing when tensors are reallocated
     # at the same address across steps.
-    key = (bids_cpu.data_ptr(), int(bids_cpu.sum()), int(start_pos), int(N), int(tpb), str(device))
+    key = (bids_cpu.data_ptr(), bids_cpu.numel(), int(bids_cpu.sum()),
+           int(bids_cpu[-1]) if bids_cpu.numel() > 0 else 0,
+           int(start_pos), int(N), int(tpb), str(device))
     cached = _PREFILL_WRITE_IDX_CACHE.get(key)
     if cached is not None:
         _PREFILL_WRITE_IDX_CACHE.move_to_end(key)
@@ -399,7 +401,12 @@ class XpuVllmPrefillImpl(FMHAImplBase):
 
         # Write K,V to paged LayerKVCache for future decode steps
         if kv_cache is not None:
-            block_ids_all = self.attn_inputs.kv_cache_block_id_device
+            # Prefer kernel-granularity block IDs for KV cache writes.
+            block_ids_all = self.attn_inputs.kv_cache_kernel_block_id_device
+            if block_ids_all is None:
+                block_ids_all = self.attn_inputs.kv_cache_block_id_device
+            if block_ids_all is None:
+                block_ids_all = self.attn_inputs.kv_cache_kernel_block_id_host
             if block_ids_all is None:
                 block_ids_all = self.attn_inputs.kv_cache_block_id_host
             if block_ids_all is not None and block_ids_all.numel() > 0:
@@ -532,8 +539,14 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         # (tokens seen so far), not the query length for the current step.
 
         # --- Use CPU-side block IDs to avoid device→host sync ---
-        block_ids_host = self.attn_inputs.kv_cache_block_id_host
-        block_ids_device = self.attn_inputs.kv_cache_block_id_device
+        # Prefer kernel-granularity block IDs for attention compute;
+        # fall back to physical block IDs (identical when kernel_blocks_per_kv_block == 1).
+        block_ids_host = self.attn_inputs.kv_cache_kernel_block_id_host
+        if block_ids_host is None:
+            block_ids_host = self.attn_inputs.kv_cache_block_id_host
+        block_ids_device = self.attn_inputs.kv_cache_kernel_block_id_device
+        if block_ids_device is None:
+            block_ids_device = self.attn_inputs.kv_cache_block_id_device
 
         try:
             num_requests = seq_lengths.numel() if seq_lengths is not None else 0
@@ -559,6 +572,7 @@ class XpuVllmDecodeImpl(FMHAImplBase):
             _pid_key = (
                 seq_lens_cpu.data_ptr(),
                 seq_lens_cpu.numel(),
+                int(seq_lens_cpu.sum()),
                 int(seq_lens_cpu[0]) if seq_lens_cpu.numel() > 0 else 0,
                 qkv.device,
             )
@@ -638,6 +652,7 @@ class XpuVllmDecodeImpl(FMHAImplBase):
             needed_bids.data_ptr(),
             needed_bids.shape[0],
             needed_bids.shape[1],
+            int(needed_bids.sum()),
             cache.device,
         )
         _fb_cache = getattr(cls, "_flat_bids_cache", None)
@@ -675,6 +690,7 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         _sk_key = (
             kv_lens.data_ptr(),
             kv_lens.numel(),
+            int(kv_lens.sum()),
             int(kv_lens[0]) if kv_lens.numel() > 0 else 0,
             qkv.device,
         )
