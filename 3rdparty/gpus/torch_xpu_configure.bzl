@@ -81,8 +81,12 @@ cc_library(name = "torch_libs")
     ])
     if ls_result.return_code != 0:
         fail("Failed to list site-packages: " + ls_result.stderr)
+    # Only symlink directories actually needed by BUILD.pytorch to reduce
+    # repository rule I/O and invalidation surface.
+    _needed = {"torch", "torch.libs", "torch.dist-info"}
     for entry in ls_result.stdout.strip().split("\n"):
-        if entry:
+        if entry and (entry in _needed or entry.startswith("torch-")
+                      or entry.startswith("torch_")):
             repository_ctx.symlink(site_packages + "/" + entry, entry)
 
     # Generate BUILD file from the provided build_file (overwrites any
