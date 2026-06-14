@@ -44,7 +44,11 @@ class RMSNorm(BaseNorm):
         hidden_states = hidden_states.to(torch.float32)
         variance = hidden_states.pow(2).mean(-1, keepdim=True)
         hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
-        return (self.weight * hidden_states).to(input_dtype)
+        result = (self.weight * hidden_states).to(input_dtype)
+        if output is not None:
+            output.copy_(result)
+            return output
+        return result
 
 
 class RMSResNorm(BaseResNorm):
