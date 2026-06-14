@@ -228,6 +228,8 @@ build:xpu --copt="-Wno-error"        # TODO(xpu): narrow to specific -Wno-xxx on
 build:xpu --host_copt="-Wno-error"   # TODO(xpu): same as above
 # Fix PYTHON_BIN_PATH for repository rules (xpu_configure.bzl).
 # --action_env (line 8) only reaches build actions; repo rules need --repo_env.
+# TODO(xpu): This path must match the Python used to generate requirements_lock_xpu.txt.
+# If the lockfile targets cp312, ensure this points to a Python 3.12 interpreter.
 build:xpu --repo_env PYTHON_BIN_PATH="/opt/conda310/bin/python3"
 build:xpu --python_top=@local_config_xpu//:python_runtime
 build:xpu --action_env LD_LIBRARY_PATH="/lib64:/usr/lib/x86_64-linux-gnu/:/opt/intel/oneapi/compiler/latest/lib:/opt/intel/oneapi/compiler/latest/opt/compiler/lib"
