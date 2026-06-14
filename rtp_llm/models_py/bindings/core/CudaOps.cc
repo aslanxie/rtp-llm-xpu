@@ -177,7 +177,8 @@ void multiMergeCopy(const MultiMergeCopyParams& params) {
         auto dst = static_cast<char*>(params.dst_ptr) + params.dst_offsets[i];
         queue.memcpy(dst, params.src_ptrs[i], params.copy_size[i]);
     }
-    queue.wait();
+    // Rely on same-queue ordering; callers that need host-visible
+    // results must synchronize at a higher level.
 }
 
 static void batchCopyFallback(const BatchCopyParams& params) {
@@ -222,7 +223,9 @@ static void batchCopyFallback(const BatchCopyParams& params) {
 }
 
 void runtimeMaskLogits(torch::Tensor& logits, const torch::Tensor& mask) {
-    throw OpException(OpErrorType::ERROR_UNIMPLEMENTED);
+    // XPU fallback: mask semantics match CUDA kernel — mask==1 means BLOCKED.
+    auto bool_mask = mask.to(torch::kBool);
+    logits.masked_fill_(bool_mask, -std::numeric_limits<float>::infinity());
 }
 
 #else  // ROCm
