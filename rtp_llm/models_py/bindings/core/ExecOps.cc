@@ -415,9 +415,12 @@ ExecStatus getGpuExecStatus() {
         }
         size_t external_headroom = static_cast<size_t>(total_bytes * reserve_ratio);
         mem.free_bytes = (raw_free > external_headroom) ? (raw_free - external_headroom) : 0;
-        // Report peak allocated bytes so warmup can size KV cache correctly.
-        mem.max_consumed_bytes = stats.allocated_bytes[
-            static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].peak;
+        // NOTE: Do NOT set max_consumed_bytes here.  The AGGREGATE peak from
+        // the caching allocator includes model-weight allocations that are
+        // already accounted for by the reduced available_bytes after warmup.
+        // Setting it would double-count weights and fail the
+        // "device_reserved > runtime_required" check in MemoryEvaluationHelper.
+        // Match the CUDA path which leaves max_consumed_bytes = 0.
     }
 #endif
     mem.used_bytes      = total_bytes - mem.free_bytes;
