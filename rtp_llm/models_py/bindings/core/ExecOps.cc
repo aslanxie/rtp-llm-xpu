@@ -415,6 +415,9 @@ ExecStatus getGpuExecStatus() {
         }
         size_t external_headroom = static_cast<size_t>(total_bytes * reserve_ratio);
         mem.free_bytes = (raw_free > external_headroom) ? (raw_free - external_headroom) : 0;
+        // Report peak allocated bytes so warmup can size KV cache correctly.
+        mem.max_consumed_bytes = stats.allocated_bytes[
+            static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].peak;
     }
 #endif
     mem.used_bytes      = total_bytes - mem.free_bytes;
