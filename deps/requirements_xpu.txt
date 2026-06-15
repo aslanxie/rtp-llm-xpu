@@ -67,4 +67,7 @@ sentence-transformers==2.7.0
 pybind11_stubgen
 py-spy
 thrift
-vllm-xpu-kernels
+# vllm-xpu-kernels is installed separately from a custom index or source
+# build; not included in pip-compile resolution since it is not on PyPI
+# or the standard PyTorch XPU wheel index.
+# Install manually: pip install vllm-xpu-kernels --find-links <url>
