@@ -116,7 +116,9 @@ class XpuSdpaPrefillImpl(FMHAImplBase):
             cu_seqlens = torch.tensor([0, total_tokens], dtype=torch.int32, device=qkv.device)
         else:
             cu_seqlens = cu_seqlens.to(device=qkv.device, dtype=torch.int32)
-        max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max().item())
+        # Compute max_seqlen on CPU to avoid unnecessary D2H sync from .item()
+        cu_seqlens_cpu = cu_seqlens if cu_seqlens.is_cpu else cu_seqlens.cpu()
+        max_seqlen = int((cu_seqlens_cpu[1:] - cu_seqlens_cpu[:-1]).max().item())
 
         output = flash_attn_varlen(
             q.contiguous(), k.contiguous(), v.contiguous(),

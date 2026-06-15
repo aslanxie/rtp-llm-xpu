@@ -389,6 +389,11 @@ def _xpu_configure_impl(repository_ctx):
 
     # Symlink Python include dir and lib .so into the repo so Bazel glob() can
     # use package-relative paths (glob() rejects absolute paths).
+    if not repository_ctx.path(python_include).exists:
+        auto_configure_fail(
+            "Python include directory not found at " + python_include + ". " +
+            "Install python3-dev / python3-devel or ensure PYTHON_BIN_PATH " +
+            "points to a Python with development headers.")
     repository_ctx.symlink(python_include, "python_include")
     if not repository_ctx.path(python_lib).exists:
         auto_configure_fail(
