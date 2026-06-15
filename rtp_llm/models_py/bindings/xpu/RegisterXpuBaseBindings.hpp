@@ -372,7 +372,7 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                       // unused (consumed by fused paths on other backends).
                       // text_tokens_mask is used in multimodal to blank non-text
                       // positions — silently ignoring it produces wrong outputs.
-                      TORCH_CHECK(!text_tokens_mask.has_value(),
+                      TORCH_CHECK(!text_tokens_mask.has_value() || text_tokens_mask->numel() == 0,
                           "XPU embedding does not yet support text_tokens_mask "
                           "(multimodal masked embedding). "
                           "Disable multimodal prefix on XPU or implement the mask.");
