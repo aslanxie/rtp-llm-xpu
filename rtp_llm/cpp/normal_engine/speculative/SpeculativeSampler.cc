@@ -41,7 +41,7 @@ void SpeculativeSampler::batchSample(SpeculativeSamplerOutput&           sample_
 
     // target_sampler_output.token_ids may be a CUDA tensor (Sampler keeps it on GPU to avoid
     // D2H sync during sampling). Move to CPU once here for data_ptr access.
-    const torch::Tensor target_token_ids_cpu = target_sampler_output.token_ids.is_cuda() ?
+    const torch::Tensor target_token_ids_cpu = (target_sampler_output.token_ids.is_cuda() || target_sampler_output.token_ids.is_xpu()) ?
                                                    target_sampler_output.token_ids.to(host_device, true) :
                                                    target_sampler_output.token_ids;
     const int*          new_all_token_ids    = target_token_ids_cpu.data_ptr<int32_t>();
