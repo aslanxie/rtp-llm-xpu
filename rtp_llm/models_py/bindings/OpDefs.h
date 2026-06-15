@@ -83,7 +83,7 @@ struct KVCache {
                                                               (int64_t)kernel_seq_size_per_block,
                                                               (int64_t)(kv_lora_rank + rope_head_dim)});
                 } else if (num_kv_heads > 0 && head_dim > 0) {
-#ifdef USING_XPU
+#if USING_XPU
                     // XPU flash layout (NSHD): [kernel_block_num, 2, kernel_seq_size_per_block, num_kv_heads, head_dim]
                     // Seq-before-head so paged flash attention can gather with no transpose.
                     // SOLE CONSUMER: rtp_llm/models_py/modules/factory/attention/xpu_impl/vllm_flash_attn.py

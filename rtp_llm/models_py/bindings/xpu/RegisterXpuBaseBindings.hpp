@@ -296,6 +296,9 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                       }
                       at::Tensor actual_input;
                       if (fuse_silu_and_mul) {
+                          TORCH_CHECK(input.size(-1) % 2 == 0,
+                              "per_token_group_quant_fp8_v2: fuse_silu_and_mul requires "
+                              "even last dim, got ", input.size(-1));
                           int64_t d = input.size(-1) / 2;
                           auto gate = input.narrow(-1, 0, d);
                           auto up   = input.narrow(-1, d, d);

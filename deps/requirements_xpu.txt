@@ -67,3 +67,4 @@ sentence-transformers==2.7.0
 pybind11_stubgen
 py-spy
 thrift
+vllm-xpu-kernels

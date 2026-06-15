@@ -224,6 +224,9 @@ static void batchCopyFallback(const BatchCopyParams& params) {
 
 void runtimeMaskLogits(torch::Tensor& logits, const torch::Tensor& mask) {
     // XPU fallback: mask semantics match CUDA kernel — mask==1 means BLOCKED.
+    TORCH_CHECK(mask.sizes() == logits.sizes(),
+        "runtimeMaskLogits: mask shape ", mask.sizes(),
+        " must match logits shape ", logits.sizes());
     auto bool_mask = mask.to(torch::kBool);
     logits.masked_fill_(bool_mask, -std::numeric_limits<float>::infinity());
 }

@@ -75,7 +75,11 @@ class XpuSdpaPrefillImpl(FMHAImplBase):
         # tokens must be written at offset = prefix_lengths[i], not 0, or they
         # will clobber the cached prefix blocks at the wrong positions.
         if kv_cache is not None:
-            block_ids_all = self.attn_inputs.kv_cache_block_id_device
+            block_ids_all = getattr(self.attn_inputs, 'kv_cache_kernel_block_id_device', None)
+            if block_ids_all is None:
+                block_ids_all = getattr(self.attn_inputs, 'kv_cache_kernel_block_id_host', None)
+            if block_ids_all is None:
+                block_ids_all = self.attn_inputs.kv_cache_block_id_device
             if block_ids_all is None:
                 block_ids_all = self.attn_inputs.kv_cache_block_id_host
             if block_ids_all is not None and block_ids_all.numel() > 0:
@@ -184,7 +188,11 @@ class XpuSdpaDecodeImpl(FMHAImplBase):
 
         # Use paged KV cache
         if kv_cache is not None:
-            block_ids_all = self.attn_inputs.kv_cache_block_id_device
+            block_ids_all = getattr(self.attn_inputs, 'kv_cache_kernel_block_id_device', None)
+            if block_ids_all is None:
+                block_ids_all = getattr(self.attn_inputs, 'kv_cache_kernel_block_id_host', None)
+            if block_ids_all is None:
+                block_ids_all = self.attn_inputs.kv_cache_block_id_device
             if block_ids_all is None:
                 block_ids_all = self.attn_inputs.kv_cache_block_id_host
             if block_ids_all is not None and block_ids_all.numel() > 0:

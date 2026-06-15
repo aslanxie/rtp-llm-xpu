@@ -283,3 +283,5 @@ class WeightManager:
 
             if self._working_stream is not None:
                 self._working_stream.synchronize()
+            elif hasattr(torch, 'xpu') and torch.xpu.is_available():
+                torch.xpu.synchronize()
