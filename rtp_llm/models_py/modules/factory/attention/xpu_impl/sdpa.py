@@ -131,7 +131,8 @@ class XpuSdpaDecodeImpl(FMHAImplBase):
     """Decode attention using PyTorch SDPA on Intel XPU with RoPE.
 
     Uses paged LayerKVCache for KV history across decode steps.
-    Only supports batch_size==1: uses seq_lengths[0]/block_ids[0] throughout.
+    Supports batched decode: processes each request independently and
+    concatenates outputs.
     """
 
     def __init__(self, attn_configs, attn_inputs, parallelism_config=None):
@@ -151,54 +152,90 @@ class XpuSdpaDecodeImpl(FMHAImplBase):
         rope_style = getattr(getattr(attn_configs, "rope_config", None), "style", RopeStyle.No)
         if rope_style in _UNSUPPORTED_ROPE_STYLES:
             return False
-        # Only supports single-request decode; multi-request needs per-row
-        # sequence_lengths/block_ids which are not yet wired up here.
-        batch_size = getattr(attn_inputs, 'batch_size', None)
-        if batch_size is None:
-            seq_lens = getattr(attn_inputs, 'sequence_lengths', None)
-            if seq_lens is not None and seq_lens.numel() > 1:
-                return False
-        elif batch_size > 1:
-            return False
         return True
+
+    @staticmethod
+    def _get_block_ids(attn_inputs):
+        """Get block IDs tensor, preferring host copies to avoid D2H sync."""
+        for attr in ('kv_cache_kernel_block_id_host',
+                     'kv_cache_block_id_host',
+                     'kv_cache_kernel_block_id_device',
+                     'kv_cache_block_id_device'):
+            ids = getattr(attn_inputs, attr, None)
+            if ids is not None and ids.numel() > 0:
+                return ids if ids.is_cpu else ids.cpu()
+        return None
 
     def forward(self, qkv, kv_cache=None, layer_idx=0):
         from rtp_llm.models_py.modules.factory.attention.xpu_impl.vllm_flash_attn import (
             _split_qkv_and_rope, _write_to_paged_cache, _read_from_paged_cache,
         )
 
+        seq_lengths = self.attn_inputs.sequence_lengths
+        num_requests = seq_lengths.numel() if seq_lengths is not None else 1
         total_tokens = qkv.shape[0]
 
-        # Compute position_ids from sequence_lengths
+        # Build position_ids for all requests (each contributes 1 token in decode)
         if self.need_rope:
-            seq_lengths = self.attn_inputs.sequence_lengths
             if seq_lengths is not None and seq_lengths.numel() > 0:
-                start_pos = int(seq_lengths[0].item())
+                seq_lens_cpu = seq_lengths if seq_lengths.is_cpu else seq_lengths.cpu()
+                self.attn_inputs.position_ids = seq_lens_cpu.to(
+                    dtype=torch.long, device=qkv.device, non_blocking=True)
             else:
-                start_pos = 0
-            self.attn_inputs.position_ids = torch.arange(
-                start_pos, start_pos + total_tokens,
-                dtype=torch.long, device=qkv.device,
-            )
+                self.attn_inputs.position_ids = torch.zeros(
+                    total_tokens, dtype=torch.long, device=qkv.device)
 
         q, k_new, v_new = _split_qkv_and_rope(
             qkv, self.attn_inputs, self.num_heads, self.num_kv_heads,
             self.head_dim, self.rope_config, self.need_rope,
         )
 
-        # Use paged KV cache
+        if kv_cache is None or num_requests <= 1:
+            # Single-request fast path (original behavior)
+            return self._single_request_forward(
+                q, k_new, v_new, kv_cache, seq_lengths, total_tokens)
+
+        # Batched decode: process each request independently
+        block_ids_all = self._get_block_ids(self.attn_inputs)
+        seq_lens_cpu = seq_lengths if seq_lengths.is_cpu else seq_lengths.cpu()
+        outputs = []
+        for i in range(num_requests):
+            start_pos = int(seq_lens_cpu[i].item())
+            qi = q[i:i+1]       # [1, num_heads, head_dim]
+            ki = k_new[i:i+1]   # [1, kv_heads, head_dim]
+            vi = v_new[i:i+1]
+
+            if block_ids_all is not None:
+                bids = block_ids_all[i].cpu() if block_ids_all.dim() > 1 else block_ids_all.cpu()
+                _write_to_paged_cache(ki, vi, kv_cache, bids, start_pos,
+                                      self.num_kv_heads, self.head_dim)
+                total_len = start_pos + 1
+                k_full, v_full = _read_from_paged_cache(
+                    kv_cache, bids, total_len, self.num_kv_heads, self.head_dim)
+            else:
+                k_full, v_full = ki, vi
+
+            if self.num_kv_heads < self.num_heads:
+                repeat_factor = self.num_heads // self.num_kv_heads
+                k_full = k_full.repeat_interleave(repeat_factor, dim=1)
+                v_full = v_full.repeat_interleave(repeat_factor, dim=1)
+
+            # SDPA: [1, heads, 1, dim] x [1, heads, seq_len, dim]
+            q_sdpa = qi.transpose(0, 1).unsqueeze(0)
+            k_sdpa = k_full.transpose(0, 1).unsqueeze(0)
+            v_sdpa = v_full.transpose(0, 1).unsqueeze(0)
+            out = F.scaled_dot_product_attention(q_sdpa, k_sdpa, v_sdpa, is_causal=False)
+            outputs.append(out.squeeze(0).transpose(0, 1))
+
+        return torch.cat(outputs, dim=0).reshape(total_tokens, -1)
+
+    def _single_request_forward(self, q, k_new, v_new, kv_cache, seq_lengths, total_tokens):
+        """Original single-request decode path."""
         if kv_cache is not None:
-            block_ids_all = getattr(self.attn_inputs, 'kv_cache_kernel_block_id_device', None)
-            if block_ids_all is None:
-                block_ids_all = getattr(self.attn_inputs, 'kv_cache_kernel_block_id_host', None)
-            if block_ids_all is None:
-                block_ids_all = self.attn_inputs.kv_cache_block_id_device
-            if block_ids_all is None:
-                block_ids_all = self.attn_inputs.kv_cache_block_id_host
+            block_ids_all = self._get_block_ids(self.attn_inputs)
             if block_ids_all is not None and block_ids_all.numel() > 0:
-                seq_lengths = self.attn_inputs.sequence_lengths
                 start_pos = int(seq_lengths[0].item()) if seq_lengths is not None and seq_lengths.numel() > 0 else 0
-                bids = block_ids_all[0].cpu()
+                bids = block_ids_all[0].cpu() if block_ids_all.dim() > 1 else block_ids_all.cpu()
                 _write_to_paged_cache(k_new, v_new, kv_cache, bids, start_pos,
                                       self.num_kv_heads, self.head_dim)
                 total_len = start_pos + total_tokens
