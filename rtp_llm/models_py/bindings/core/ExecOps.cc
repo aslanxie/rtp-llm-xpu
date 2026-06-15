@@ -622,6 +622,15 @@ MlaOpsType initRuntime(size_t device_id, bool trace_memory, bool enable_comm_ove
 #elif USING_XPU
         RTP_LLM_LOG_INFO("Initialize runtime (XPU/Intel GPU). device_id=%zu", device_id);
         c10::xpu::set_device(static_cast<c10::DeviceIndex>(device_id));
+
+        if (resolved_mla_ops_type == MlaOpsType::AUTO) {
+            resolved_mla_ops_type = MlaOpsType::MHA;
+        }
+        if (resolved_mla_ops_type != MlaOpsType::MHA && resolved_mla_ops_type != MlaOpsType::NONE) {
+            RTP_LLM_LOG_WARNING("XPU does not support MLA ops type %d, falling back to MHA",
+                                static_cast<int>(resolved_mla_ops_type));
+            resolved_mla_ops_type = MlaOpsType::MHA;
+        }
 #endif
 
         g_enable_comm_overlap = enable_comm_overlap;

@@ -207,15 +207,17 @@ class XpuSdpaDecodeImpl(FMHAImplBase):
             ki = k_new[i:i+1]   # [1, kv_heads, head_dim]
             vi = v_new[i:i+1]
 
-            if block_ids_all is not None:
-                bids = block_ids_all[i].cpu() if block_ids_all.dim() > 1 else block_ids_all.cpu()
-                _write_to_paged_cache(ki, vi, kv_cache, bids, start_pos,
-                                      self.num_kv_heads, self.head_dim)
-                total_len = start_pos + 1
-                k_full, v_full = _read_from_paged_cache(
-                    kv_cache, bids, total_len, self.num_kv_heads, self.head_dim)
-            else:
-                k_full, v_full = ki, vi
+            if block_ids_all is None:
+                raise RuntimeError(
+                    "SDPA decode: kv_cache is present but no block IDs found. "
+                    "Cannot read KV history without block table.")
+                
+            bids = block_ids_all[i].cpu() if block_ids_all.dim() > 1 else block_ids_all.cpu()
+            _write_to_paged_cache(ki, vi, kv_cache, bids, start_pos,
+                                  self.num_kv_heads, self.head_dim)
+            total_len = start_pos + 1
+            k_full, v_full = _read_from_paged_cache(
+                kv_cache, bids, total_len, self.num_kv_heads, self.head_dim)
 
             if self.num_kv_heads < self.num_heads:
                 repeat_factor = self.num_heads // self.num_kv_heads
@@ -235,16 +237,17 @@ class XpuSdpaDecodeImpl(FMHAImplBase):
         """Original single-request decode path."""
         if kv_cache is not None:
             block_ids_all = self._get_block_ids(self.attn_inputs)
-            if block_ids_all is not None and block_ids_all.numel() > 0:
-                start_pos = int(seq_lengths[0].item()) if seq_lengths is not None and seq_lengths.numel() > 0 else 0
-                bids = block_ids_all[0].cpu() if block_ids_all.dim() > 1 else block_ids_all.cpu()
-                _write_to_paged_cache(k_new, v_new, kv_cache, bids, start_pos,
-                                      self.num_kv_heads, self.head_dim)
-                total_len = start_pos + total_tokens
-                k, v = _read_from_paged_cache(kv_cache, bids, total_len,
-                                              self.num_kv_heads, self.head_dim)
-            else:
-                k, v = k_new, v_new
+            if block_ids_all is None or block_ids_all.numel() == 0:
+                raise RuntimeError(
+                    "SDPA decode: kv_cache is present but no block IDs found. "
+                    "Cannot read KV history without block table.")
+            start_pos = int(seq_lengths[0].item()) if seq_lengths is not None and seq_lengths.numel() > 0 else 0
+            bids = block_ids_all[0].cpu() if block_ids_all.dim() > 1 else block_ids_all.cpu()
+            _write_to_paged_cache(k_new, v_new, kv_cache, bids, start_pos,
+                                  self.num_kv_heads, self.head_dim)
+            total_len = start_pos + total_tokens
+            k, v = _read_from_paged_cache(kv_cache, bids, total_len,
+                                          self.num_kv_heads, self.head_dim)
         else:
             k, v = k_new, v_new
 
