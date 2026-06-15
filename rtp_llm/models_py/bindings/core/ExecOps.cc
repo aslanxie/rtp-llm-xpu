@@ -626,7 +626,7 @@ MlaOpsType initRuntime(size_t device_id, bool trace_memory, bool enable_comm_ove
         if (resolved_mla_ops_type == MlaOpsType::AUTO) {
             resolved_mla_ops_type = MlaOpsType::MHA;
         }
-        if (resolved_mla_ops_type != MlaOpsType::MHA && resolved_mla_ops_type != MlaOpsType::NONE) {
+        if (resolved_mla_ops_type != MlaOpsType::MHA) {
             RTP_LLM_LOG_WARNING("XPU does not support MLA ops type %d, falling back to MHA",
                                 static_cast<int>(resolved_mla_ops_type));
             resolved_mla_ops_type = MlaOpsType::MHA;
