@@ -77,7 +77,8 @@ _COS_SIN_CACHE_MAX_SIZE = 32
 def _get_cos_sin_cache(rope_config, head_dim, max_pos, dtype, device):
     rotary_dim = getattr(rope_config, 'dim', 0) or head_dim
     base = getattr(rope_config, 'base', 10000.0) or 10000.0
-    key = (base, rotary_dim, max_pos, dtype, str(device))
+    scale = getattr(rope_config, 'scale', 1.0) or 1.0
+    key = (base, rotary_dim, max_pos, scale, dtype, str(device))
     if key in _COS_SIN_CACHE:
         _COS_SIN_CACHE.move_to_end(key)
         return _COS_SIN_CACHE[key]
@@ -87,6 +88,8 @@ def _get_cos_sin_cache(rope_config, head_dim, max_pos, dtype, device):
         del _COS_SIN_CACHE[oldest_key]
     inv_freq = 1.0 / (base ** (torch.arange(0, rotary_dim, 2, dtype=torch.float32) / rotary_dim))
     t = torch.arange(max_pos, dtype=torch.float32)
+    if scale != 1.0:
+        t = t / scale
     freqs = torch.outer(t, inv_freq)
     cache = torch.cat((freqs.cos(), freqs.sin()), dim=-1)
     cache = cache.to(dtype=dtype, device=device)
