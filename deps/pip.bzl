@@ -66,12 +66,14 @@ def pip_deps():
         timeout = 12000,
     )
 
-    # NOTE: The XPU lockfile was generated with Python 3.12 (PyTorch XPU wheels
-    # require ==3.12). In the XPU Docker image, /opt/conda310/bin/python3 is a
-    # symlink to /opt/venv/bin/python3 (Python 3.12), so the interpreter version
-    # matches the lockfile. In non-XPU containers this path is Python 3.10, but
-    # pip_parse with --generate-hashes lockfiles does not re-resolve dependencies,
-    # so the version mismatch is safe in practice.
+    # XPU lockfile was generated with Python 3.12 (PyTorch XPU requires ==3.12).
+    # pip_parse is evaluated at WORKSPACE load time in ALL containers, so the
+    # interpreter path must exist everywhere.  In XPU containers,
+    # /opt/conda310/bin/python3 is a symlink to Python 3.12; in non-XPU
+    # containers it is Python 3.10, but pip_parse with hashed lockfiles
+    # does not re-resolve -- and XPU packages are only fetched when a target
+    # references @pip_xpu_torch (lazy evaluation), which only happens under
+    # --config=xpu.  xpu_configure.bzl validates the resolved Python == 3.12.
     pip_parse(
         name = "pip_xpu_torch",
         requirements_lock = "@rtp_deps//:requirements_lock_xpu.txt",

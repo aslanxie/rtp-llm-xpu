@@ -368,6 +368,22 @@ def _xpu_configure_impl(repository_ctx):
     python_bin = _get_python_bin(repository_ctx)
     # Resolve symlinked python to venv python so site-packages is correct
     python_bin = resolve_venv_python(repository_ctx, python_bin)
+
+    # Validate Python version: XPU builds require Python 3.12 (PyTorch XPU
+    # ships only cp312 wheels).  In XPU containers /opt/conda310/bin/python3
+    # is a symlink to a Python 3.12 venv; fail early if the resolved
+    # interpreter is something else.
+    _py_ver = repository_ctx.execute([python_bin, "-c",
+        "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"])
+    if _py_ver.return_code == 0:
+        _ver = _py_ver.stdout.strip()
+        if _ver != "3.12":
+            auto_configure_fail(
+                "XPU build requires Python 3.12 but PYTHON_BIN_PATH (%s) " % python_bin +
+                "resolves to Python %s. " % _ver +
+                "In the XPU Docker image, /opt/conda310/bin/python3 should be a symlink " +
+                "to a Python 3.12 venv. Check your container setup.")
+
     python_include = _get_python_include(repository_ctx, python_bin)
     python_lib = _get_python_lib(repository_ctx, python_bin)
 
