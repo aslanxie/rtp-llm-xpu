@@ -284,11 +284,17 @@ inline PyWrappedModel::PyWrappedModel(const GptModelInitParams& params,
 
     cache_store_async_writer_ = std::make_unique<CacheStoreAsyncWriter>();
 
+#if USING_CUDA || USING_ROCM
     if (device_props_.enable_prefill_cp) {
         context_parallel_processor_ =
             ContextParallelProcessorFactory::create(ProcessorType::ZIG_ZAG, params.parallelism_config);
         RTP_LLM_LOG_INFO("Context parallel processor initialized with ZIG_ZAG strategy.");
     }
+#elif USING_XPU
+    if (device_props_.enable_prefill_cp) {
+        RTP_LLM_LOG_WARNING("Prefill context parallelism is not supported on XPU, ignoring enable_prefill_cp");
+    }
+#endif
 
     RTP_LLM_LOG_INFO("PyWrappedModel initialized done.");
 }

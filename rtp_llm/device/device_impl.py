@@ -1027,7 +1027,10 @@ class XpuImpl(GpuImpl):
     def get_device_id(self) -> int:
         try:
             return torch.xpu.current_device()
-        except Exception:
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "XPU current_device() failed (%s), falling back to device 0", e)
             return 0
 
     def _get_mem_info(self) -> MemInfo:

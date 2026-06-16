@@ -107,6 +107,24 @@ try:
 except BaseException as e:
     logging.info(f"Exception: {e}, traceback: {traceback.format_exc()}")
 
+# Preload libpython for the current Python version (required by frontend imports).
+# Use sysconfig to resolve the correct library path dynamically.
+try:
+    import sysconfig
+    _libdir = sysconfig.get_config_var("LIBDIR")
+    _ldlibrary = sysconfig.get_config_var("LDLIBRARY")
+    if _libdir and _ldlibrary:
+        _libpython_path = os.path.join(_libdir, _ldlibrary)
+        if os.path.exists(_libpython_path):
+            from ctypes import cdll
+            cdll.LoadLibrary(_libpython_path)
+            logging.info(f"loaded {_ldlibrary} from {_libdir}")
+        else:
+            logging.debug(f"libpython not found at {_libpython_path}, skipping preload")
+    else:
+        logging.debug("sysconfig LIBDIR/LDLIBRARY not available, skipping libpython preload")
+except Exception as e:
+    logging.debug(f"libpython preload skipped: {e}")
 
 try:
     from libth_transformer_config import (

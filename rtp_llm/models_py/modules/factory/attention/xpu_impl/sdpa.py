@@ -47,6 +47,10 @@ class XpuSdpaPrefillImpl(FMHAImplBase):
     def support(attn_configs, attn_inputs):
         if not attn_inputs.is_prefill:
             return False
+        # XPU SDPA only supports BASE (unquantized) KV cache.
+        kv_dt = getattr(attn_configs, 'kv_cache_dtype', None)
+        if kv_dt is not None and kv_dt != KvCacheDataType.BASE:
+            return False
         rope_style = getattr(getattr(attn_configs, "rope_config", None), "style", RopeStyle.No)
         if rope_style in _UNSUPPORTED_ROPE_STYLES:
             return False
@@ -150,6 +154,10 @@ class XpuSdpaDecodeImpl(FMHAImplBase):
     @staticmethod
     def support(attn_configs, attn_inputs):
         if attn_inputs.is_prefill:
+            return False
+        # XPU SDPA only supports BASE (unquantized) KV cache.
+        kv_dt = getattr(attn_configs, 'kv_cache_dtype', None)
+        if kv_dt is not None and kv_dt != KvCacheDataType.BASE:
             return False
         rope_style = getattr(getattr(attn_configs, "rope_config", None), "style", RopeStyle.No)
         if rope_style in _UNSUPPORTED_ROPE_STYLES:

@@ -408,9 +408,13 @@ ExecStatus getGpuExecStatus() {
         double reserve_ratio = 0.10;
         const char* ratio_env = std::getenv("XPU_MEM_RESERVE_RATIO");
         if (ratio_env != nullptr) {
-            double parsed = std::atof(ratio_env);
-            if (parsed >= 0.0 && parsed < 1.0) {
+            char* endptr = nullptr;
+            double parsed = std::strtod(ratio_env, &endptr);
+            if (endptr != ratio_env && *endptr == '\0' && parsed >= 0.0 && parsed < 1.0) {
                 reserve_ratio = parsed;
+            } else {
+                RTP_LLM_LOG_WARNING("Invalid XPU_MEM_RESERVE_RATIO='%s', using default %.2f",
+                                    ratio_env, reserve_ratio);
             }
         }
         size_t external_headroom = static_cast<size_t>(total_bytes * reserve_ratio);

@@ -31,7 +31,7 @@ void fusedCopy(const FusedD2DCopyParams& params) {
     invokeFusedCopy(params, stream);
 #elif USING_XPU
     // XPU fallback: sequential async memcpy via SYCL queue
-    RTP_LLM_CHECK(params.num_copies >= 0);
+    RTP_LLM_CHECK(params.num_copies >= 0 && params.num_copies <= MAX_FUSED_D2D_COPIES);
     sycl::queue& queue = c10::xpu::getCurrentXPUStream();
     for (int i = 0; i < params.num_copies; ++i) {
         RTP_LLM_CHECK(params.dst[i] != nullptr && params.src[i] != nullptr);
@@ -51,7 +51,7 @@ void fusedStridedCopy(const FusedStridedCopyParams& params) {
     invokeFusedStridedCopy(params, stream);
 #elif USING_XPU
     // XPU fallback: sequential async strided memcpy via SYCL queue
-    RTP_LLM_CHECK(params.num_copies >= 0);
+    RTP_LLM_CHECK(params.num_copies >= 0 && params.num_copies <= MAX_FUSED_STRIDED_COPIES);
     sycl::queue& queue = c10::xpu::getCurrentXPUStream();
     for (int i = 0; i < params.num_copies; ++i) {
         RTP_LLM_CHECK(params.dst[i] != nullptr && params.src[i] != nullptr);

@@ -172,8 +172,15 @@ void runtimeCopy(const CopyParams& params) {
 }
 
 void multiMergeCopy(const MultiMergeCopyParams& params) {
+    RTP_LLM_CHECK_WITH_INFO(params.dst_ptr != nullptr, "multiMergeCopy: dst_ptr is null");
+    RTP_LLM_CHECK_WITH_INFO(params.src_ptrs.size() == params.copy_size.size()
+                            && params.src_ptrs.size() == params.dst_offsets.size(),
+                            "multiMergeCopy: src_ptrs/copy_size/dst_offsets length mismatch");
     sycl::queue& queue = c10::xpu::getCurrentXPUStream();
     for (size_t i = 0; i < params.src_ptrs.size(); i++) {
+        if (params.copy_size[i] == 0) continue;
+        RTP_LLM_CHECK_WITH_INFO(params.src_ptrs[i] != nullptr,
+                                "multiMergeCopy: src_ptrs[%zu] is null for non-zero copy", i);
         auto dst = static_cast<char*>(params.dst_ptr) + params.dst_offsets[i];
         queue.memcpy(dst, params.src_ptrs[i], params.copy_size[i]);
     }

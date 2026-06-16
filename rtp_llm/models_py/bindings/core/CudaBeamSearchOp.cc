@@ -212,11 +212,15 @@ BeamSearchOutput sampleBeamSearch(BeamSearchParams params) {
     //    (mirroring what the CUDA populateTokenIds kernel does)
     auto write_pos = sequence_lengths_out.to(torch::kLong).unsqueeze(-1);  // [batch, beam_out, 1]
     // Guard against scattering past the allocated sequence dimension.
+    // Use device-side masking throughout to avoid per-step host sync.
+    auto safe_mask = (write_pos < max_seq_len).squeeze(-1);  // [batch, beam_out]
     write_pos = write_pos.clamp(0, max_seq_len - 1);
-    token_ids_out.scatter_(2, write_pos, output_ids.unsqueeze(-1));
+    // Write tokens only for beams that have not overflowed (device-side where).
+    auto safe_ids = output_ids.where(safe_mask, token_ids_out.gather(2, write_pos).squeeze(-1));
+    token_ids_out.scatter_(2, write_pos, safe_ids.unsqueeze(-1));
 
-    // 9. Increment sequence lengths (the CUDA stage-3 kernel does this internally)
-    sequence_lengths_out = sequence_lengths_out + 1;
+    // 9. Increment sequence lengths only for beams that have not overflowed.
+    sequence_lengths_out = sequence_lengths_out + safe_mask.to(torch::kInt32);
 
     // 10. Cumulative log probs
     auto cum_log_probs_out = topk_log_probs.to(torch::kFloat32);

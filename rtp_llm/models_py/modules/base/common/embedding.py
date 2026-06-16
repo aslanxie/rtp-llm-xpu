@@ -43,10 +43,12 @@ class Embedding(nn.Module):
         hidden_size = self.weight.size(-1)
         if not hasattr(rtp_llm_ops, 'embedding'):
             if text_tokens_mask is not None and text_tokens_mask.numel() > 0:
-                import logging
-                logging.getLogger(__name__).warning(
-                    "Embedding fallback (F.embedding) does not support text_tokens_mask; "
-                    "multimodal masking will be ignored.")
+                if not getattr(Embedding, '_warned_mask_unsupported', False):
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "Embedding fallback (F.embedding) does not support text_tokens_mask; "
+                        "multimodal masking will be ignored. This warning is shown once.")
+                    Embedding._warned_mask_unsupported = True
             output = F.embedding(input, self.weight.data)
         else:
             output = torch.empty(

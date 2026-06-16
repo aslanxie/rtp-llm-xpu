@@ -177,12 +177,15 @@ def flash_attn_varlen(q, k, v, cu_seqlens_q, cu_seqlens_k,
 def _sdpa_varlen_fallback(q, k, v, cu_seqlens_q, cu_seqlens_k,
                           max_seqlen_q, max_seqlen_k, softmax_scale, causal):
     import torch.nn.functional as F
-    batch_size = cu_seqlens_q.numel() - 1
+    # Copy cu_seqlens to CPU once to avoid per-request D2H sync in the loop.
+    cu_q_cpu = cu_seqlens_q.cpu() if cu_seqlens_q.is_cuda or (hasattr(cu_seqlens_q, 'is_xpu') and cu_seqlens_q.is_xpu) else cu_seqlens_q
+    cu_k_cpu = cu_seqlens_k.cpu() if cu_seqlens_k.is_cuda or (hasattr(cu_seqlens_k, 'is_xpu') and cu_seqlens_k.is_xpu) else cu_seqlens_k
+    batch_size = cu_q_cpu.numel() - 1
     outputs = []
     scale = softmax_scale or (q.shape[-1] ** -0.5)
     for i in range(batch_size):
-        q_start, q_end = cu_seqlens_q[i].item(), cu_seqlens_q[i + 1].item()
-        k_start, k_end = cu_seqlens_k[i].item(), cu_seqlens_k[i + 1].item()
+        q_start, q_end = cu_q_cpu[i].item(), cu_q_cpu[i + 1].item()
+        k_start, k_end = cu_k_cpu[i].item(), cu_k_cpu[i + 1].item()
         qi = q[q_start:q_end].unsqueeze(0).transpose(1, 2)
         ki = k[k_start:k_end].unsqueeze(0).transpose(1, 2)
         vi = v[k_start:k_end].unsqueeze(0).transpose(1, 2)

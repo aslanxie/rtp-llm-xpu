@@ -15,6 +15,7 @@ import torch.nn.functional as F
 from rtp_llm.models_py.modules.factory.attention import common
 from rtp_llm.models_py.modules.factory.attention.fmha_impl_base import FMHAImplBase
 from rtp_llm.ops import AttentionConfigs, ParallelismConfig, RopeStyle
+from rtp_llm.ops import KvCacheDataType
 from rtp_llm.ops.compute_ops import LayerKVCache, PyAttentionInputs
 
 # RoPE styles unsupported by the XPU Base-frequency cache.
@@ -364,6 +365,10 @@ class XpuVllmPrefillImpl(FMHAImplBase):
     def support(attn_configs, attn_inputs):
         if not attn_inputs.is_prefill:
             return False
+        # XPU attention only supports BASE (unquantized) KV cache.
+        kv_dt = getattr(attn_configs, 'kv_cache_dtype', None)
+        if kv_dt is not None and kv_dt != KvCacheDataType.BASE:
+            return False
         # Prefix-cache (chunked prefill / reuse) is not yet implemented here:
         # the path does not load previously written K/V blocks into attention,
         # so any request with prefix_lengths > 0 would produce wrong results.
@@ -412,6 +417,10 @@ class XpuVllmPrefillImpl(FMHAImplBase):
                 block_ids_all = self.attn_inputs.kv_cache_kernel_block_id_host
             if block_ids_all is None:
                 block_ids_all = self.attn_inputs.kv_cache_block_id_host
+            if block_ids_all is None or block_ids_all.numel() == 0:
+                raise RuntimeError(
+                    "XPU prefill: kv_cache is present but no block IDs available. "
+                    "Cannot write KV to paged cache without block table.")
             if block_ids_all is not None and block_ids_all.numel() > 0:
                 block_ids_cpu = block_ids_all if block_ids_all.is_cpu else block_ids_all.cpu()
                 if input_lengths_cpu is not None and input_lengths_cpu.numel() > 1:
@@ -497,6 +506,10 @@ class XpuVllmDecodeImpl(FMHAImplBase):
     @staticmethod
     def support(attn_configs, attn_inputs):
         if attn_inputs.is_prefill:
+            return False
+        # XPU attention only supports BASE (unquantized) KV cache.
+        kv_dt = getattr(attn_configs, 'kv_cache_dtype', None)
+        if kv_dt is not None and kv_dt != KvCacheDataType.BASE:
             return False
         # Requires FA2 (flash_attn_varlen); fall back to XpuSdpaDecodeImpl
         # when FA2 is not installed, rather than crashing at forward() time.
