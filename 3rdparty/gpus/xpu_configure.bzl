@@ -383,6 +383,10 @@ def _xpu_configure_impl(repository_ctx):
                 "resolves to Python %s. " % _ver +
                 "In the XPU Docker image, /opt/conda310/bin/python3 should be a symlink " +
                 "to a Python 3.12 venv. Check your container setup.")
+    else:
+        auto_configure_fail(
+            "Failed to detect Python version from %s (exit code %d).\n" % (python_bin, _py_ver.return_code) +
+            "stdout: %s\nstderr: %s" % (_py_ver.stdout.strip(), _py_ver.stderr.strip()))
 
     python_include = _get_python_include(repository_ctx, python_bin)
     python_lib = _get_python_lib(repository_ctx, python_bin)
