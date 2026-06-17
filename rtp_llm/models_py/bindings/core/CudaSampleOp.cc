@@ -513,6 +513,16 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
     // 7. Re-normalize and sample
     auto row_sums  = filtered_probs.sum(-1, true);
     filtered_probs = filtered_probs / row_sums.clamp_min(1e-10f);
+    // Fix degenerate rows BEFORE multinomial to prevent crash on XPU.
+    // Replace invalid rows with uniform distribution so multinomial won't throw.
+    if (!row_valid.all().item<bool>()) {
+        float uniform_val = 1.0f / static_cast<float>(filtered_probs.size(1));
+        for (int64_t b = 0; b < batch_size; b++) {
+            if (!row_valid[b].item<bool>()) {
+                filtered_probs[b].fill_(uniform_val);
+            }
+        }
+    }
     auto selected  = torch::multinomial(filtered_probs, 1, false).squeeze(-1);
 
     // Use per-request generators when available (respects request-level random seeds)
