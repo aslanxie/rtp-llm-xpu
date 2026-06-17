@@ -411,12 +411,15 @@ def setup_default_args(py_env_configs):
         logging.info(
             "[MI308X] set SEQ_SIZE_PER_BLOCK 16 by default, as it just support 16 now."
         )
-    from rtp_llm.device.device_impl import _is_xpu_device
-
     if (
-        _is_xpu_device()
+        os.path.exists("/dev/alixpu")
         and py_env_configs.kv_cache_config.seq_size_per_block == 0
     ):
+        # Only the Ali XPU custom attention path supports a 256 page size.
+        # Generic Intel XPU uses the vllm fmha kernel, whose paged attention
+        # rejects page size 256 ("Unsupported page size for fmha"), so leave it
+        # to fall through to the 64 default below.  Gate on the device node
+        # (/dev/alixpu) rather than _is_xpu_device() to keep that distinction.
         py_env_configs.kv_cache_config.seq_size_per_block = 256
         logging.info("set SEQ_SIZE_PER_BLOCK 256 by default")
     if py_env_configs.kv_cache_config.seq_size_per_block == 0:
