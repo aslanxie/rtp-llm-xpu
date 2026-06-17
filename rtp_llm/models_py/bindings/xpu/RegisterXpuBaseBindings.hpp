@@ -497,6 +497,11 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                           "fast_topk_v2: ragged layout (row_starts) is not yet supported on XPU. "
                           "Only dense/paged layout is supported.");
                       int64_t k = indices.size(-1);
+                      TORCH_CHECK(k >= 0 && k <= score.size(-1),
+                          "fast_topk_v2: k (", k, ") must be in [0, score.size(-1)=", score.size(-1), "]");
+                      TORCH_CHECK(lengths.dim() == 1 && lengths.size(0) == score.size(0),
+                          "fast_topk_v2: lengths must be 1-D with length equal to score.size(0)=", score.size(0),
+                          ", got shape [", lengths.sizes(), "]");
                       // Work on a copy so the caller's score tensor is not mutated;
                       // fast_topk_v2 only produces indices (CUDA semantics).
                       auto work = score.clone();

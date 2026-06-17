@@ -409,14 +409,14 @@ class XpuVllmPrefillImpl(FMHAImplBase):
 
         # Write K,V to paged LayerKVCache for future decode steps
         if kv_cache is not None:
-            # Prefer kernel-granularity block IDs for KV cache writes.
-            block_ids_all = self.attn_inputs.kv_cache_kernel_block_id_device
+            # Prefer host block IDs to avoid device->host sync in the write path.
+            block_ids_all = self.attn_inputs.kv_cache_kernel_block_id_host
             if block_ids_all is None:
-                block_ids_all = self.attn_inputs.kv_cache_block_id_device
-            if block_ids_all is None:
-                block_ids_all = self.attn_inputs.kv_cache_kernel_block_id_host
+                block_ids_all = self.attn_inputs.kv_cache_kernel_block_id_device
             if block_ids_all is None:
                 block_ids_all = self.attn_inputs.kv_cache_block_id_host
+            if block_ids_all is None:
+                block_ids_all = self.attn_inputs.kv_cache_block_id_device
             if block_ids_all is None or block_ids_all.numel() == 0:
                 raise RuntimeError(
                     "XPU prefill: kv_cache is present but no block IDs available. "
