@@ -86,6 +86,13 @@ class XpuSdpaPrefillImpl(FMHAImplBase):
                 block_ids_all = self.attn_inputs.kv_cache_block_id_device
             if block_ids_all is None:
                 block_ids_all = self.attn_inputs.kv_cache_block_id_host
+            if block_ids_all is None or block_ids_all.numel() == 0:
+                # Fail fast instead of silently skipping the KV write, which
+                # would leave the paged cache empty and corrupt later decode
+                # steps. Mirrors XpuVllmPrefillImpl behaviour.
+                raise RuntimeError(
+                    "XPU SDPA prefill: kv_cache is present but no block IDs available. "
+                    "Cannot write KV to paged cache without block table.")
             if block_ids_all is not None and block_ids_all.numel() > 0:
                 input_lengths = self.attn_inputs.input_lengths
                 prefix_lengths = getattr(self.attn_inputs, 'prefix_lengths', None)
@@ -186,18 +193,24 @@ class XpuSdpaDecodeImpl(FMHAImplBase):
         total_tokens = qkv.shape[0]
 
         # Build position_ids for all requests (each contributes 1 token in decode)
+        max_pos_hint = None
         if self.need_rope:
             if seq_lengths is not None and seq_lengths.numel() > 0:
                 seq_lens_cpu = seq_lengths if seq_lengths.is_cpu else seq_lengths.cpu()
                 self.attn_inputs.position_ids = seq_lens_cpu.to(
                     dtype=torch.long, device=qkv.device, non_blocking=True)
+                # Pass a CPU-computed max position so _apply_rope does not call
+                # positions.max().item() on the XPU tensor (a per-layer D2H sync).
+                max_pos_hint = int(seq_lens_cpu.max())
             else:
                 self.attn_inputs.position_ids = torch.zeros(
                     total_tokens, dtype=torch.long, device=qkv.device)
+                max_pos_hint = 0
 
         q, k_new, v_new = _split_qkv_and_rope(
             qkv, self.attn_inputs, self.num_heads, self.num_kv_heads,
             self.head_dim, self.rope_config, self.need_rope,
+            max_pos_hint=max_pos_hint,
         )
 
         if kv_cache is None or num_requests <= 1:

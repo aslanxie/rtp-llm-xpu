@@ -517,24 +517,26 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
     auto row_valid = (row_sums.squeeze(-1) > 0) & row_sums.squeeze(-1).isfinite();
     filtered_probs = filtered_probs / row_sums.clamp_min(1e-10f);
     // Fix degenerate rows BEFORE multinomial to prevent crash on XPU.
-    // Replace invalid rows with uniform distribution so multinomial won't throw.
-    if (!row_valid.all().item<bool>()) {
-        float uniform_val = 1.0f / static_cast<float>(filtered_probs.size(1));
-        for (int64_t b = 0; b < batch_size; b++) {
-            if (!row_valid[b].item<bool>()) {
-                filtered_probs[b].fill_(uniform_val);
-            }
-        }
-    }
+    // Replace invalid rows with a uniform distribution so multinomial won't throw.
+    // Done purely on-device (torch::where) to avoid any per-row D2H .item() syncs.
+    float uniform_val = 1.0f / static_cast<float>(filtered_probs.size(1));
+    filtered_probs    = torch::where(row_valid.unsqueeze(-1),
+                                  filtered_probs,
+                                  torch::full_like(filtered_probs, uniform_val));
     auto selected  = torch::multinomial(filtered_probs, 1, false).squeeze(-1);
-    if (!row_valid.all().item<bool>()) {
-        auto fallback = torch::argmax(params.logits, -1, false);
-        selected = torch::where(row_valid, selected, fallback);
-    }
+    // For any degenerate row, override the (uniform) draw with argmax on the
+    // original logits. Pure-device select, no host sync.
+    auto fallback = torch::argmax(params.logits, -1, false);
+    selected      = torch::where(row_valid, selected, fallback);
 
-    // Use per-request generators when available (respects request-level random seeds)
+    // Use per-request generators when available (respects request-level random seeds).
+    // Copy row_valid to host ONCE so the loop incurs no per-row D2H syncs, and skip
+    // degenerate rows so the argmax fallback above is preserved instead of being
+    // overwritten by a uniform-distribution multinomial draw.
+    auto  row_valid_cpu  = row_valid.to(torch::kCPU);
+    auto* row_valid_host = row_valid_cpu.data_ptr<bool>();
     for (int64_t b = 0; b < batch_size; b++) {
-        if (params.generator[b].defined()) {
+        if (params.generator[b].defined() && row_valid_host[b]) {
             // selected[b] = ... does NOT write back in-place in C++ libtorch;
             // use select(0,b).copy_() to update the underlying storage.
             auto sampled = torch::multinomial(

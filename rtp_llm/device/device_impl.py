@@ -1029,7 +1029,25 @@ class XpuImpl(GpuImpl):
             return torch.xpu.current_device()
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning(
+            import os
+            logger = logging.getLogger(__name__)
+            # current_device() can fail before set_device() has run. Rather than
+            # blindly targeting device 0 (wrong on a multi-card box and a silent
+            # source of cross-device corruption), derive the id from LOCAL_RANK
+            # honoured against the visible-device mask (ZE_AFFINITY_MASK).
+            try:
+                local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+                visible = get_visible_device_list()
+                if visible and local_rank < len(visible):
+                    dev_id = int(visible[local_rank])
+                    logger.warning(
+                        "XPU current_device() failed (%s); using device %d "
+                        "derived from LOCAL_RANK=%d and visible list %s",
+                        e, dev_id, local_rank, visible)
+                    return dev_id
+            except Exception as inner:
+                logger.warning("XPU device-id derivation failed (%s)", inner)
+            logger.warning(
                 "XPU current_device() failed (%s), falling back to device 0", e)
             return 0
 

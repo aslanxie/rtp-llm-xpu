@@ -411,8 +411,10 @@ def setup_default_args(py_env_configs):
         logging.info(
             "[MI308X] set SEQ_SIZE_PER_BLOCK 16 by default, as it just support 16 now."
         )
+    from rtp_llm.device.device_impl import _is_xpu_device
+
     if (
-        os.path.exists("/dev/alixpu")
+        _is_xpu_device()
         and py_env_configs.kv_cache_config.seq_size_per_block == 0
     ):
         py_env_configs.kv_cache_config.seq_size_per_block = 256
