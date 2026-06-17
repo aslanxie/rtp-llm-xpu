@@ -467,7 +467,7 @@ GptModelOutputs PyWrappedModel::forward(const GptModelInputs& inputs) {
             return forwardMicroBatched(inputs);
         }
         PyContextParallelParams cp_params;
-        if (device_props_.enable_prefill_cp) {
+        if (effective_enable_prefill_cp_) {
             context_parallel_processor_->handleInputs(const_cast<GptModelInputs&>(inputs), cp_params);
         }
 
@@ -485,7 +485,7 @@ GptModelOutputs PyWrappedModel::forward(const GptModelInputs& inputs) {
         auto multimodal_inputs     = buildPyMultimodalInputs(inputs);
         auto attention_inputs      = buildPyAttentionInputs(inputs);
         auto bert_embedding_inputs = buildBertEmbeddingInputs(inputs);
-        if (device_props_.enable_prefill_cp) {
+        if (effective_enable_prefill_cp_) {
             attention_inputs.context_parallel_info = cp_params;
         }
 
@@ -545,7 +545,7 @@ GptModelOutputs PyWrappedModel::forward(const GptModelInputs& inputs) {
         }
 
         RTP_LLM_LOG_DEBUG("Python object instance forward method called successfully.");
-        if (device_props_.enable_prefill_cp) {
+        if (effective_enable_prefill_cp_) {
             size_t num_valid_tokens = context_parallel_processor_->handleOutputs(hidden_states, inputs, cp_params);
             return callForwardPostLayers(hidden_states, inputs, true, num_valid_tokens);
         }

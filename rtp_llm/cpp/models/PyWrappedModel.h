@@ -98,6 +98,7 @@ private:
     bool       check_nan_{false};
 
     std::unique_ptr<IContextParallelProcessor> context_parallel_processor_{nullptr};
+    bool effective_enable_prefill_cp_{false};
     std::unique_ptr<CacheStoreAsyncWriter>     cache_store_async_writer_;
 
     // Accumulated H2D copies from tensorHoldHostAndToCuda(); flushed as one kernel per forward.
@@ -288,6 +289,7 @@ inline PyWrappedModel::PyWrappedModel(const GptModelInitParams& params,
     if (device_props_.enable_prefill_cp) {
         context_parallel_processor_ =
             ContextParallelProcessorFactory::create(ProcessorType::ZIG_ZAG, params.parallelism_config);
+        effective_enable_prefill_cp_ = true;
         RTP_LLM_LOG_INFO("Context parallel processor initialized with ZIG_ZAG strategy.");
     }
 #elif USING_XPU
