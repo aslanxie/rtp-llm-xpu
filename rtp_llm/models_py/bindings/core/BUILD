@@ -222,6 +222,7 @@ cc_library(
     ] + torch_deps() + select({
         "@//:using_cuda": [
             "//rtp_llm/models_py/bindings/common/kernels:kernels_sampling",
+            "//rtp_llm/models_py/bindings/cuda/kernels/sampling:sampling",
         ],
         "@//:using_rocm": [
             "//rtp_llm/models_py/bindings/common/kernels:kernels_sampling",
@@ -288,6 +289,7 @@ cc_library(
     ] + torch_deps() + select({
         "@//:using_cuda": [
             "//rtp_llm/models_py/bindings/common/kernels:kernels_sampling",
+            "//rtp_llm/models_py/bindings/cuda/kernels/sampling:sampling",
         ],
         "@//:using_rocm": [
             "//rtp_llm/models_py/bindings/common/kernels:kernels_sampling",
