@@ -681,6 +681,11 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         H = self.num_kv_heads
         D = self.head_dim
         need_size = nb * tpb * H * D
+        # Scratch is bounded by total KV cache capacity; assert to make bound explicit.
+        max_allowed = cache.shape[0] * tpb * H * D
+        assert need_size <= max_allowed, (
+            f"KV scratch {need_size} exceeds cache capacity {max_allowed}"
+        )
         # Persistent scratch buffers grow monotonically to avoid per-call
         # XPU allocations across N layers x M steps.
         scratch = getattr(cls, "_kv_scratch", None)
