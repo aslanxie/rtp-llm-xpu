@@ -586,15 +586,20 @@ class XpuVllmDecodeImpl(FMHAImplBase):
 
         # Class-level step caches (shared across all layers in one decode step).
         cls = type(self)
-        # Step counter: increments once per decode step (not per layer).
-        # Used in cache keys to prevent stale data when host tensors are reused.
-        _content_id = (seq_lens_cpu.numel(), int(seq_lens_cpu.sum()),
-                       int(seq_lens_cpu[0]) if seq_lens_cpu.numel() > 0 else -1,
-                       int(seq_lens_cpu[-1]) if seq_lens_cpu.numel() > 0 else -1)
-        _prev = getattr(cls, "_step_content_id", None)
-        if _prev != _content_id:
+        # Step counter: increments exactly once per decode step (not per layer).
+        # Derive the step boundary from the authoritative layer_idx sequence
+        # (each decode step calls layers 0, 1, ..., num_layers-1 in order)
+        # rather than from a seq_lens content fingerprint.  When layer_idx wraps
+        # back (current <= last seen) a new decode step has begun, so _step_id is
+        # bumped.  This guarantees every step gets a unique, monotonically
+        # increasing id, so the per-step device tensors cached below
+        # (position_ids / write indices / flat_bids / seqused_k) can never be
+        # reused across two different batch shapes that merely share the same
+        # seq_lens fingerprint.
+        _last_layer = getattr(cls, "_last_layer_idx", None)
+        if _last_layer is None or layer_idx <= _last_layer:
             cls._step_id = getattr(cls, "_step_id", 0) + 1
-            cls._step_content_id = _content_id
+        cls._last_layer_idx = layer_idx
         _sid = cls._step_id
         # Set position_ids for RoPE — CPU→device transfer (async, no sync).
         # Hoist across layers: identical for all 36 layers in a decode step.
