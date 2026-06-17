@@ -1047,9 +1047,11 @@ class XpuImpl(GpuImpl):
                     return dev_id
             except Exception as inner:
                 logger.warning("XPU device-id derivation failed (%s)", inner)
-            logger.warning(
-                "XPU current_device() failed (%s), falling back to device 0", e)
-            return 0
+            raise RuntimeError(
+                f"XPU current_device() failed ({e}) and device id could not be "
+                f"derived from LOCAL_RANK={os.environ.get('LOCAL_RANK', '<unset>')}"
+                f"/ZE_AFFINITY_MASK={os.environ.get('ZE_AFFINITY_MASK', '<unset>')}. "
+                f"Ensure torch.xpu.set_device() is called before model init.")
 
     def _get_mem_info(self) -> MemInfo:
         dev_id = self.get_device_id()
@@ -1079,13 +1081,16 @@ class XpuImpl(GpuImpl):
 # ── Device-agnostic utility functions ──────────────────────────────────────
 
 def _is_xpu_device() -> bool:
-    """Check if the resolved device type is XPU (consistent with get_device_type)."""
-    return hasattr(torch, "xpu") and torch.xpu.is_available()
+    """Check if the resolved device type is XPU, respecting RTP_LLM_DEVICE_TYPE override."""
+    from rtp_llm.device.device_type import get_device_type, DeviceType
+    return get_device_type() == DeviceType.Xpu
 
 
 def _is_cuda_device() -> bool:
-    """Check if the resolved device type is CUDA/ROCm (not XPU)."""
-    return not _is_xpu_device() and torch.cuda.is_available()
+    """Check if the resolved device type is CUDA/ROCm (not XPU), respecting RTP_LLM_DEVICE_TYPE."""
+    from rtp_llm.device.device_type import get_device_type, DeviceType
+    dt = get_device_type()
+    return dt in (DeviceType.Cuda, DeviceType.ROCm, DeviceType.Ppu)
 
 
 def gpu_is_available() -> bool:

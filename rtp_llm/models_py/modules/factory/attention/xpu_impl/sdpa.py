@@ -192,6 +192,14 @@ class XpuSdpaDecodeImpl(FMHAImplBase):
         num_requests = seq_lengths.numel() if seq_lengths is not None else 1
         total_tokens = qkv.shape[0]
 
+        # Guard: SDPA decode assumes exactly 1 token per request. Multi-token
+        # decode (speculative / chunked) requires causal masking not implemented here.
+        if total_tokens != num_requests:
+            raise RuntimeError(
+                f"XpuSdpaDecodeImpl expects 1 token per request (decode), got "
+                f"total_tokens={total_tokens} for num_requests={num_requests}. "
+                f"Use a prefill impl for multi-token inputs.")
+
         # Build position_ids for all requests (each contributes 1 token in decode)
         max_pos_hint = None
         if self.need_rope:

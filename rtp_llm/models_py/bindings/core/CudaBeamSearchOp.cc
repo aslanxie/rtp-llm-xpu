@@ -172,6 +172,18 @@ BeamSearchOutput sampleBeamSearch(BeamSearchParams params) {
     auto opts_int   = torch::TensorOptions().dtype(torch::kInt32).device(device);
 
     // 1. Compute log-softmax probabilities: [batch, beam_in, vocab]
+    // Shape / dtype guards
+    RTP_LLM_CHECK_WITH_INFO(params.logits.dim() == 3,
+        "beam_search: logits must be 3D [batch, beam_in, vocab], got dim=" +
+        std::to_string(params.logits.dim()));
+    RTP_LLM_CHECK_WITH_INFO(params.cum_log_probs.dim() == 2,
+        "beam_search: cum_log_probs must be 2D [batch, beam_in], got dim=" +
+        std::to_string(params.cum_log_probs.dim()));
+    RTP_LLM_CHECK_WITH_INFO(beam_width_out > 0 && beam_width_out <= beam_width_in * vocab_size,
+        "beam_search: beam_width_out=" + std::to_string(beam_width_out) +
+        " out of valid range [1, beam_in*vocab=" +
+        std::to_string((int64_t)beam_width_in * vocab_size) + "]");
+
     auto log_probs = params.logits.to(torch::kFloat32).log_softmax(-1);
 
     // 2. Add cumulative log probs from previous steps: [batch, beam_in, 1]

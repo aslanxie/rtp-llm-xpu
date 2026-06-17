@@ -647,13 +647,7 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         needed_bids = bids_2d_cpu[:, :max_blocks_needed]
 
         # Hoist write-indices CPU→GPU across layers (identical for all 36 layers)
-        _wk = (
-            _sid,
-            seq_lens_cpu.numel(),
-            int(seq_lens_cpu.sum()),
-            int(bids_2d_cpu.sum()),
-            cache.device,
-        )
+        _wk = (_sid, cache.device)
         _wc = getattr(cls, "_write_idx_cache", None)
         if _wc is not None and _wc[0] == _wk:
             bid_dev, off_dev = _wc[1], _wc[2]
@@ -680,13 +674,10 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         # [num_blocks, 2, tpb, H, D] the gather output is already
         # [Nb, tpb, H, D] -- no transpose needed (the legacy MHA layout
         # required an extra transpose copy).
-        _fb_key = (
-            _sid,
-            needed_bids.shape[0],
-            needed_bids.shape[1],
-            int(needed_bids.sum()),
-            cache.device,
-        )
+        # Cache key: _sid alone is sufficient because within a single decode step
+        # (all layers), the block table from attn_inputs is constant. The _sid
+        # increments monotonically every step, preventing cross-step reuse.
+        _fb_key = (_sid, cache.device)
         _fb_cache = getattr(cls, "_flat_bids_cache", None)
         if _fb_cache is not None and _fb_cache[0] == _fb_key:
             flat_bids = _fb_cache[1]
@@ -704,6 +695,13 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         )
         # Persistent scratch buffers grow monotonically to avoid per-call
         # XPU allocations across N layers x M steps.
+        # SAFETY: This class-level scratch is safe only because XPU decode is
+        # single-threaded and single-stream (Python GIL + one decode stream per
+        # engine instance). If concurrency changes, replace with per-instance or
+        # per-stream scratch.
+        assert not getattr(cls, "_scratch_in_use", False), (
+            "Concurrent access to class-level KV scratch detected. "
+            "XpuVllmDecodeImpl requires single-threaded decode.")
         scratch = getattr(cls, "_kv_scratch", None)
         if scratch is None or scratch[0].device != cache.device or \
                 scratch[0].dtype != cache.dtype or \

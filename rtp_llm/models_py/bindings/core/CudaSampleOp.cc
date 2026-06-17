@@ -530,18 +530,24 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
     selected      = torch::where(row_valid, selected, fallback);
 
     // Use per-request generators when available (respects request-level random seeds).
-    // Copy row_valid to host ONCE so the loop incurs no per-row D2H syncs, and skip
-    // degenerate rows so the argmax fallback above is preserved instead of being
-    // overwritten by a uniform-distribution multinomial draw.
-    auto  row_valid_cpu  = row_valid.to(torch::kCPU);
-    auto* row_valid_host = row_valid_cpu.data_ptr<bool>();
-    for (int64_t b = 0; b < batch_size; b++) {
-        if (params.generator[b].defined() && row_valid_host[b]) {
-            // selected[b] = ... does NOT write back in-place in C++ libtorch;
-            // use select(0,b).copy_() to update the underlying storage.
-            auto sampled = torch::multinomial(
-                filtered_probs[b].unsqueeze(0), 1, false, params.generator[b]).squeeze();
-            selected.select(0, b).copy_(sampled);
+    // Skip the D2H transfer entirely when no generators are defined — the common
+    // case in greedy/top-k sampling where no per-request seed is set.
+    bool has_any_generator = std::any_of(
+        params.generator.begin(), params.generator.end(),
+        [](const c10::optional<at::Generator>& g) { return g.has_value() && g->defined(); });
+    if (has_any_generator) {
+        // Copy row_valid to host ONCE so the loop incurs no per-row D2H syncs,
+        // and skip degenerate rows so the argmax fallback is preserved.
+        auto  row_valid_cpu  = row_valid.to(torch::kCPU);
+        auto* row_valid_host = row_valid_cpu.data_ptr<bool>();
+        for (int64_t b = 0; b < batch_size; b++) {
+            if (params.generator[b].defined() && row_valid_host[b]) {
+                // selected[b] = ... does NOT write back in-place in C++ libtorch;
+                // use select(0,b).copy_() to update the underlying storage.
+                auto sampled = torch::multinomial(
+                    filtered_probs[b].unsqueeze(0), 1, false, params.generator[b]).squeeze();
+                selected.select(0, b).copy_(sampled);
+            }
         }
     }
 

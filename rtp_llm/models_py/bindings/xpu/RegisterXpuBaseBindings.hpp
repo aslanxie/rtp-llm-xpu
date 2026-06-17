@@ -348,6 +348,15 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                      at::Tensor& token_expert_indices,
                      const at::Tensor& gating_output) {
                       int64_t k = topk_weights.size(-1);
+                      // Shape guards: topk_indices is [num_tokens, k], token_expert_indices
+                      // must be [num_tokens * k] to hold the flattened expert assignments.
+                      TORCH_CHECK(topk_indices.dim() == 2 && topk_indices.size(-1) == k,
+                          "XPU moe_softmax_topk: topk_indices must be [T, k], got ",
+                          topk_indices.sizes());
+                      TORCH_CHECK(token_expert_indices.numel() == topk_indices.numel(),
+                          "XPU moe_softmax_topk: token_expert_indices.numel()=",
+                          token_expert_indices.numel(), " != topk_indices.numel()=",
+                          topk_indices.numel());
                       auto softmaxed = at::softmax(gating_output.to(at::kFloat), -1);
                       auto topk_result = softmaxed.topk(k, -1);
                       topk_weights.copy_(std::get<0>(topk_result).to(topk_weights.scalar_type()));
