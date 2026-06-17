@@ -14,3 +14,14 @@ py_test(
     ],
     tags = ["xpu"],
 )
+
+py_test(
+    name = "test_no_rope",
+    srcs = ["test_no_rope.py"],
+    deps = [
+        "//rtp_llm/models_py:models",
+        "//rtp_llm:config",
+        "//rtp_llm:testlib",
+    ],
+    tags = ["xpu"],
+)

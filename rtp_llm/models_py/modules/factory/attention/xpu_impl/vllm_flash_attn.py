@@ -110,7 +110,11 @@ def _apply_rotary_emb_neox(x, cos, sin):
 def _need_rope(attn_configs):
     if getattr(attn_configs, 'need_rope_kv_cache', False):
         return True
-    return getattr(attn_configs.rope_config, 'style', 0) != 0
+    rope_config = getattr(attn_configs, 'rope_config', None)
+    if rope_config is None:
+        return False
+    style = getattr(rope_config, 'style', RopeStyle.No)
+    return style != RopeStyle.No
 
 
 def _apply_rope(q, k, positions, rope_config, head_dim, num_heads, num_kv_heads, device, dtype, max_pos_hint=None):
