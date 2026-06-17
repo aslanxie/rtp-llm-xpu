@@ -293,7 +293,6 @@ inline PyWrappedModel::PyWrappedModel(const GptModelInitParams& params,
 #elif USING_XPU
     if (device_props_.enable_prefill_cp) {
         RTP_LLM_LOG_WARNING("Prefill context parallelism is not supported on XPU, ignoring enable_prefill_cp");
-        device_props_.enable_prefill_cp = false;
     }
 #endif
 
