@@ -544,15 +544,15 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         flash_attn_varlen = _get_flash_attn_varlen()
         seq_lengths = self.attn_inputs.sequence_lengths
 
-        # Note on speculative decode (q_len > 1 per request):
-        # This path assumes max_seqlen_q=1 per request (normal autoregressive decode).
-        # XPU speculative decode is not currently enabled, so this is safe.
-        # If speculative decode is added in future, guard with:
-        #   num_requests = seq_lengths.numel()
-        #   if qkv.shape[0] > num_requests: raise NotImplementedError(...)
-        # Do NOT use attn_inputs.input_lengths for this check —
-        # input_lengths is the accumulated KV-cache sequence length
-        # (tokens seen so far), not the query length for the current step.
+        # Guard against speculative/multi-token decode (q_len > 1 per request).
+        # This path assumes max_seqlen_q=1 (normal autoregressive decode).
+        _num_req = seq_lengths.numel() if seq_lengths is not None else qkv.shape[0]
+        if qkv.shape[0] != _num_req:
+            raise NotImplementedError(
+                f"XPU paged decode does not support multi-token query "
+                f"(got {qkv.shape[0]} tokens for {_num_req} requests). "
+                f"Speculative decode is not supported on XPU."
+            )
 
         # --- Use CPU-side block IDs to avoid device→host sync ---
         # Prefer kernel-granularity block IDs for attention compute;
