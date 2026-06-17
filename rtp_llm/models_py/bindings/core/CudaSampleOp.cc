@@ -512,6 +512,9 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
 
     // 7. Re-normalize and sample
     auto row_sums  = filtered_probs.sum(-1, true);
+    // Guard against invalid probability distributions (all-zero / NaN / Inf rows).
+    // Fall back to argmax on the original logits for any degenerate row.
+    auto row_valid = (row_sums.squeeze(-1) > 0) & row_sums.squeeze(-1).isfinite();
     filtered_probs = filtered_probs / row_sums.clamp_min(1e-10f);
     // Fix degenerate rows BEFORE multinomial to prevent crash on XPU.
     // Replace invalid rows with uniform distribution so multinomial won't throw.
@@ -524,6 +527,10 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
         }
     }
     auto selected  = torch::multinomial(filtered_probs, 1, false).squeeze(-1);
+    if (!row_valid.all().item<bool>()) {
+        auto fallback = torch::argmax(params.logits, -1, false);
+        selected = torch::where(row_valid, selected, fallback);
+    }
 
     // Use per-request generators when available (respects request-level random seeds)
     for (int64_t b = 0; b < batch_size; b++) {
