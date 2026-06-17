@@ -582,14 +582,23 @@ class XpuVllmDecodeImpl(FMHAImplBase):
 
         # Class-level step caches (shared across all layers in one decode step).
         cls = type(self)
+        # Step counter: increments once per decode step (not per layer).
+        # Used in cache keys to prevent stale data when host tensors are reused.
+        _content_id = (seq_lens_cpu.numel(), int(seq_lens_cpu.sum()),
+                       int(seq_lens_cpu[0]) if seq_lens_cpu.numel() > 0 else -1,
+                       int(seq_lens_cpu[-1]) if seq_lens_cpu.numel() > 0 else -1)
+        _prev = getattr(cls, "_step_content_id", None)
+        if _prev != _content_id:
+            cls._step_id = getattr(cls, "_step_id", 0) + 1
+            cls._step_content_id = _content_id
+        _sid = cls._step_id
         # Set position_ids for RoPE — CPU→device transfer (async, no sync).
         # Hoist across layers: identical for all 36 layers in a decode step.
         if self.need_rope:
             _pid_key = (
-                seq_lens_cpu.data_ptr(),
+                _sid,
                 seq_lens_cpu.numel(),
                 int(seq_lens_cpu.sum()),
-                int(seq_lens_cpu[0]) if seq_lens_cpu.numel() > 0 else 0,
                 qkv.device,
             )
             _pid_cache = getattr(cls, "_pos_ids_cache", None)
@@ -630,12 +639,10 @@ class XpuVllmDecodeImpl(FMHAImplBase):
 
         # Hoist write-indices CPU→GPU across layers (identical for all 36 layers)
         _wk = (
-            seq_lens_cpu.data_ptr(),
+            _sid,
             seq_lens_cpu.numel(),
-            int(seq_lens_cpu.sum()),  # content fingerprint to detect aliasing
-            int(seq_lens_cpu[0]) if seq_lens_cpu.numel() > 0 else 0,
-            bids_2d_cpu.data_ptr(),
-            int(bids_2d_cpu.sum()),   # content fingerprint
+            int(seq_lens_cpu.sum()),
+            int(bids_2d_cpu.sum()),
             cache.device,
         )
         _wc = getattr(cls, "_write_idx_cache", None)
@@ -665,7 +672,7 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         # [Nb, tpb, H, D] -- no transpose needed (the legacy MHA layout
         # required an extra transpose copy).
         _fb_key = (
-            needed_bids.data_ptr(),
+            _sid,
             needed_bids.shape[0],
             needed_bids.shape[1],
             int(needed_bids.sum()),
@@ -709,10 +716,9 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         # Hoist seqused_k across layers: kv_lens identical for all layers
         # in one decode step. Saves N-1 CPU->XPU copies per step.
         _sk_key = (
-            kv_lens.data_ptr(),
+            _sid,
             kv_lens.numel(),
             int(kv_lens.sum()),
-            int(kv_lens[0]) if kv_lens.numel() > 0 else 0,
             qkv.device,
         )
         _sk_cache = getattr(cls, "_seqused_k_cache", None)
