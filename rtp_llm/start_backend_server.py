@@ -12,7 +12,12 @@ from multiprocessing import Process
 from typing import List, Optional
 
 import torch
-from rtp_llm.device.device_impl import gpu_is_available, gpu_device_count, get_visible_device_list
+from rtp_llm.device.device_impl import (
+    gpu_is_available,
+    gpu_device_count,
+    get_visible_device_list,
+    _is_xpu_device,
+)
 from rtp_llm.ops import VitSeparation
 from setproctitle import setproctitle
 
@@ -164,7 +169,14 @@ def _create_rank_processes(
         range(pc.world_rank, pc.world_rank + local_world_size)
     ):
         reader, writer = multiprocessing.Pipe(duplex=False)
-        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(cuda_device_list)
+        # Bind visible devices using the env var that matches the runtime:
+        # XPU honors ZE_AFFINITY_MASK, CUDA/ROCm honor CUDA_VISIBLE_DEVICES.
+        # (Per-rank device pinning itself happens in the child via
+        # setup_cuda_device_and_accl_env -> torch.{xpu,cuda}.set_device.)
+        if _is_xpu_device():
+            os.environ["ZE_AFFINITY_MASK"] = ",".join(cuda_device_list)
+        else:
+            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(cuda_device_list)
         os.environ["WORLD_RANK"] = str(world_rank)
 
         proc = Process(
@@ -446,6 +458,16 @@ def start_backend_server(
         )
 
     if gpu_device_count() > 1 and pc.world_size > 1:
+        # XPU has no multi-rank distributed backend yet. Fail-fast instead of
+        # silently spawning ranks that cannot form a collective. Set
+        # XPU_ENABLE_MULTI_RANK=1 to opt in once XPU distributed is supported.
+        if _is_xpu_device() and os.environ.get("XPU_ENABLE_MULTI_RANK") != "1":
+            raise RuntimeError(
+                f"XPU multi-rank startup (world_size={pc.world_size}, "
+                f"device_count={gpu_device_count()}) is not supported yet. "
+                "Run with world_size=1, or set XPU_ENABLE_MULTI_RANK=1 to "
+                "force the multi-rank path once XPU distributed is available."
+            )
         return multi_rank_start(global_controller, py_env_configs, pipe_writer)
     else:
         return local_rank_start(global_controller, py_env_configs, 0, pipe_writer)
