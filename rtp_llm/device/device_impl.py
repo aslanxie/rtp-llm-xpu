@@ -1060,56 +1060,62 @@ class XpuImpl(GpuImpl):
 
 # ── Device-agnostic utility functions ──────────────────────────────────────
 
+def _is_xpu_device() -> bool:
+    """Check if the resolved device type is XPU (consistent with get_device_type)."""
+    return hasattr(torch, "xpu") and torch.xpu.is_available()
+
+
+def _is_cuda_device() -> bool:
+    """Check if the resolved device type is CUDA/ROCm (not XPU)."""
+    return not _is_xpu_device() and torch.cuda.is_available()
+
+
 def gpu_is_available() -> bool:
     """Check if any GPU device is available (CUDA, ROCm, or XPU)."""
-    if torch.cuda.is_available():
-        return True
-    if hasattr(torch, "xpu") and torch.xpu.is_available():
-        return True
-    return False
+    return _is_xpu_device() or _is_cuda_device()
 
 
 def gpu_device_count() -> int:
     """Return the number of available GPU devices."""
-    if torch.cuda.is_available():
-        return torch.cuda.device_count()
-    if hasattr(torch, "xpu") and torch.xpu.is_available():
+    if _is_xpu_device():
         return torch.xpu.device_count()
+    if _is_cuda_device():
+        return torch.cuda.device_count()
     return 0
 
 
 def gpu_set_device(device_id: int) -> None:
     """Set the current GPU device."""
-    if torch.cuda.is_available():
-        torch.cuda.set_device(device_id)
-    elif hasattr(torch, "xpu") and torch.xpu.is_available():
+    if _is_xpu_device():
         torch.xpu.set_device(device_id)
+    elif _is_cuda_device():
+        torch.cuda.set_device(device_id)
 
 
 def gpu_current_device() -> int:
     """Get the current GPU device index."""
-    if torch.cuda.is_available():
-        return torch.cuda.current_device()
-    if hasattr(torch, "xpu") and torch.xpu.is_available():
+    if _is_xpu_device():
         return torch.xpu.current_device()
+    if _is_cuda_device():
+        return torch.cuda.current_device()
     return 0
 
 
 def gpu_device_name(device_id: int = 0) -> str:
     """Get the name of a GPU device."""
-    if torch.cuda.is_available():
-        return torch.cuda.get_device_name(device_id)
-    if hasattr(torch, "xpu") and torch.xpu.is_available():
+    if _is_xpu_device():
         return torch.xpu.get_device_name(device_id)
+    if _is_cuda_device():
+        return torch.cuda.get_device_name(device_id)
     return "cpu"
 
 
 def gpu_memory_info(device_id: int = 0):
     """Return (free, total) memory in bytes for the GPU device."""
-    if torch.cuda.is_available():
-        return torch.cuda.mem_get_info(device_id)
-    if hasattr(torch, "xpu") and torch.xpu.is_available():
+    if _is_xpu_device():
         return torch.xpu.mem_get_info(device_id)
+    if _is_cuda_device():
+        return torch.cuda.mem_get_info(device_id)
     import psutil
     vmem = psutil.virtual_memory()
     return (vmem.available, vmem.total)
@@ -1117,10 +1123,10 @@ def gpu_memory_info(device_id: int = 0):
 
 def get_device_string() -> str:
     """Return the device string for tensor placement ('cuda', 'xpu', or 'cpu')."""
-    if torch.cuda.is_available():
-        return "cuda"
-    if hasattr(torch, "xpu") and torch.xpu.is_available():
+    if _is_xpu_device():
         return "xpu"
+    if _is_cuda_device():
+        return "cuda"
     return "cpu"
 
 
