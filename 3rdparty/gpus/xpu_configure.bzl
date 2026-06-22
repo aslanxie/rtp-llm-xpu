@@ -328,7 +328,8 @@ def _xpu_configure_impl(repository_ctx):
             "TF_NEED_XPU=1 but libze_loader.so not found. " +
             "The XPU toolchain unconditionally links -lze_loader. " +
             "Install the Level Zero loader (e.g. level-zero-devel) or " +
-            "ensure it is in /usr/lib/x86_64-linux-gnu/ or ONEAPI_ROOT/lib/.")
+            "ensure it is in /usr/lib/x86_64-linux-gnu/, /usr/lib64/, " +
+            "or " + oneapi_compiler_dir + "/lib/.")
     ze_loader_lib_dir = ze_loader_lib.rsplit("/", 1)[0]
 
     # Substitute SYCL target and ze_loader search dir into toolchain config template

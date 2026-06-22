@@ -26,14 +26,14 @@ try:
     import vllm_xpu_kernels._C  # noqa: F401
     _VLLM_XPU_AVAILABLE = True
     logger.info("vllm-xpu-kernels _C loaded")
-except ImportError as exc:
+except (ImportError, OSError, RuntimeError) as exc:
     logger.warning("vllm-xpu-kernels _C not available: %s", exc)
 
 try:
     import vllm_xpu_kernels._vllm_fa2_C  # noqa: F401
     _FA2_AVAILABLE = True
     logger.info("vllm-xpu-kernels FA2 loaded")
-except ImportError as exc:
+except (ImportError, OSError, RuntimeError) as exc:
     logger.warning("vllm-xpu-kernels FA2 not available: %s", exc)
 
 try:
@@ -41,7 +41,7 @@ try:
     import vllm_xpu_kernels._xpu_C  # noqa: F401
     _MOE_AVAILABLE = True
     logger.info("vllm-xpu-kernels MoE loaded")
-except ImportError as exc:
+except (ImportError, OSError, RuntimeError) as exc:
     logger.warning("vllm-xpu-kernels MoE not available: %s", exc)
 
 

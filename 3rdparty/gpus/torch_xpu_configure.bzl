@@ -50,14 +50,16 @@ cc_library(name = "torch_libs")
         repository_ctx.file("torch/lib/.empty", "")
         return
 
-    # Auto-detect site-packages from the Python interpreter
+    # Auto-detect site-packages from the actual torch installation path.
+    # Using torch.__file__ instead of site.getsitepackages() avoids mismatches
+    # in venv/system-site-packages or custom sys.path configurations.
     result = repository_ctx.execute([
         python_bin,
         "-c",
-        "import site; print(site.getsitepackages()[0])",
+        "import torch, os; print(os.path.dirname(os.path.dirname(torch.__file__)))",
     ])
     if result.return_code != 0:
-        fail("Failed to detect site-packages: " + result.stderr)
+        fail("Failed to detect site-packages from torch.__file__: " + result.stderr)
 
     site_packages = result.stdout.strip()
 
