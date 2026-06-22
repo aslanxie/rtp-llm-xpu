@@ -573,13 +573,24 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
         // Use the same probability source as output_all_probs for consistency
         auto& prob_source = (params.return_original_all_probs) ? probs_t : filtered_probs;
         auto token_prob = prob_source.gather(1, selected.unsqueeze(-1).to(torch::kLong)).squeeze(1);
+        auto log_prob   = token_prob.log();
+        // Degenerate rows (row_valid=false) emitted the argmax fallback token;
+        // their prob source may be 0/NaN, so log_prob is -inf/NaN. Zero those
+        // updates so a single invalid row cannot corrupt cum_log_probs (which
+        // would cascade into beam ranking / stop criteria).
+        log_prob = torch::where(row_valid, log_prob, torch::zeros_like(log_prob));
         auto cum_log_probs_t = params.cum_log_probs.value();
-        cum_log_probs_t.add_(token_prob.log().to(cum_log_probs_t.device()));
+        cum_log_probs_t.add_(log_prob.to(cum_log_probs_t.device()));
     }
 
     // 9. Copy back
     params.token_ids.copy_(transposed_tokens.transpose(0, 1).contiguous());
-    return GreedyOutput{};
+    // Signal degenerate rows (invalid prob distribution: all-zero / NaN / Inf)
+    // to the caller via success=false instead of silently trusting the argmax
+    // fallback. This matches the CUDA/flashinfer contract (the dispatcher turns
+    // a false row into a reported error). The uniform/argmax fallback above only
+    // exists to keep multinomial from crashing on XPU; rows remain marked failed.
+    return GreedyOutput{row_valid};
 }
 
 // XPU: Speculative (draft-model) sampling is not supported.

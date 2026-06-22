@@ -359,6 +359,16 @@ def _read_from_paged_cache(kv_cache, block_ids_cpu, total_len, num_kv_heads, hea
     bids = block_ids_cpu.reshape(-1)
     if total_len == 0:
         return cache.new_empty(0, num_kv_heads, head_dim), cache.new_empty(0, num_kv_heads, head_dim)
+    # Guard against a short block table: reading total_len positions needs
+    # ceil(total_len / tpb) block ids. Without this check an undersized table
+    # would index out of bounds and silently gather garbage / wrong-request KV.
+    blocks_needed = (total_len + tpb - 1) // tpb
+    if blocks_needed > bids.numel():
+        raise RuntimeError(
+            f"paged KV read out of range: need {blocks_needed} blocks for "
+            f"total_len={total_len} (tpb={tpb}) but block table has only "
+            f"{bids.numel()} entries."
+        )
     # Compute block slot and offset for each position
     positions = torch.arange(total_len, dtype=torch.long)
     blk_slots = positions // tpb
@@ -787,7 +797,10 @@ class XpuVllmDecodeImpl(FMHAImplBase):
             cls._kv_scratch_by_stream = scratch_map
         key = (cache.device, _stream_key)
         mk = lambda: torch.empty(need_size, dtype=cache.dtype, device=cache.device)
-        need_bytes = need_size * cache.element_size()
+        # A retained entry holds TWO buffers (K and V), so the memory actually
+        # retained per key is 2 * need_bytes. Compare that total against the cap
+        # so XPU_DECODE_SCRATCH_MAX_MB reflects real retained bytes, not half.
+        need_bytes = 2 * need_size * cache.element_size()
         if need_bytes > cls._SCRATCH_RETAIN_MAX_BYTES:
             # Above the retention cap: use transient buffers (freed after this
             # step) so a single long-context request cannot permanently inflate

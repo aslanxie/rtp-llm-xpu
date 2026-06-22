@@ -112,15 +112,22 @@ def get_cxx_inc_directories(repository_ctx, cc):
 def _oneapi_root(repository_ctx):
     """Return the oneAPI root path."""
     oneapi_root = repository_ctx.os.environ.get(_ONEAPI_ROOT, "")
-    if not oneapi_root:
-        # Try common install locations
-        for path in ["/opt/intel/oneapi", "/opt/oneapi"]:
-            if repository_ctx.path(path).exists:
-                return path
-        auto_configure_fail(
-            "Cannot find Intel oneAPI. Set ONEAPI_ROOT environment variable " +
-            "or install to /opt/intel/oneapi.")
-    return oneapi_root
+    if oneapi_root:
+        # A stale/invalid ONEAPI_ROOT must not silently shadow a working default
+        # install. Validate the env-provided path before trusting it.
+        if not repository_ctx.path(oneapi_root).exists:
+            auto_configure_fail(
+                "ONEAPI_ROOT is set to '" + oneapi_root + "' but that path does " +
+                "not exist. Unset it to use a default install, or point it at a " +
+                "valid Intel oneAPI root.")
+        return oneapi_root
+    # Try common install locations
+    for path in ["/opt/intel/oneapi", "/opt/oneapi"]:
+        if repository_ctx.path(path).exists:
+            return path
+    auto_configure_fail(
+        "Cannot find Intel oneAPI. Set ONEAPI_ROOT environment variable " +
+        "or install to /opt/intel/oneapi.")
 
 def _find_icx(repository_ctx, oneapi_root):
     """Find icx compiler path."""

@@ -81,6 +81,16 @@ class AutoModel:
                     model_config.mla_ops_type)
                 model_config.mla_ops_type = MlaOpsType.MHA
 
+        # Bind the current process to its target GPU BEFORE creating/loading
+        # the model. Otherwise model weights default to device 0 while the C++
+        # runtime (init_exec_ctx below) binds to world_rank % local_world_size,
+        # so on multi-GPU nodes Python weights and the runtime land on different
+        # devices.
+        pc = engine_config.parallelism_config
+        device_id = pc.world_rank % pc.local_world_size
+        from rtp_llm.device.device_impl import gpu_set_device
+        gpu_set_device(device_id)
+
         # Create model using ModelFactory
         self.gpt_model = ModelFactory._create_model(
             model_config=model_config,
@@ -95,9 +105,8 @@ class AutoModel:
         self.model = self.gpt_model.py_model
         self.model_config = self.gpt_model.model_config
 
-        pc = engine_config.parallelism_config
         init_exec_ctx(
-            device_id=pc.world_rank % pc.local_world_size,
+            device_id=device_id,
             trace_memory=engine_config.profiling_debug_logging_config.trace_memory,
             enable_comm_overlap=engine_config.device_resource_config.enable_comm_overlap,
             mla_ops_type=int(model_config.mla_ops_type),
