@@ -1,5 +1,6 @@
 #include "rtp_llm/models_py/bindings/core/OpData.h"
 #include "rtp_llm/models_py/bindings/core/CommonDefines.h"
+#include "rtp_llm/models_py/bindings/core/ExecOps.h"
 #include <algorithm>
 
 #if USING_CUDA
@@ -289,8 +290,6 @@ void chainSpeculativeSampling(const SpeculativeSamplingParams& params) {
 }
 
 #elif USING_XPU  // XPU platform — pure PyTorch sampling
-
-torch::Device getTorchDevice();
 
 GreedyOutput sampleGreedy(const GreedyParams& params) {
     const auto batch_size        = params.logits.size(0);

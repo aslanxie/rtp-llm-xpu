@@ -58,8 +58,18 @@ void cudaProfilerEnd();
 // ===================================================================
 
 ExecStatus    getGpuExecStatus();
-torch::Device getTorchDevice();
+
+inline torch::Device getTorchDevice() {
+#if USING_XPU
+    return torch::Device(torch::kXPU, static_cast<c10::DeviceIndex>(getDeviceId()));
+#elif USING_CUDA || USING_ROCM
+    return torch::Device(torch::kCUDA);
+#else
+    return torch::Device(torch::kCPU);
+#endif
+}
 inline torch::Device getTorchCudaDevice() { return getTorchDevice(); }
+
 void          setTraceMemory(bool trace_memory);
 
 // ===================================================================
