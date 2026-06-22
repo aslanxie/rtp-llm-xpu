@@ -5,6 +5,16 @@
 #include "rtp_llm/cpp/disaggregate/cache_store/TcpCacheStoreServiceImplContext.h"
 #include "rtp_llm/cpp/disaggregate/cache_store/CacheTransferServiceImplContext.h"
 
+namespace {
+#if USING_ROCM
+constexpr c10::DeviceType kCacheStoreGpuDevice = torch::kCUDA;
+#elif USING_XPU
+constexpr c10::DeviceType kCacheStoreGpuDevice = torch::kXPU;
+#else
+constexpr c10::DeviceType kCacheStoreGpuDevice = torch::kCUDA;
+#endif
+}
+
 namespace rtp_llm {
 
 TcpCacheStoreServiceImpl::TcpCacheStoreServiceImpl(
@@ -114,7 +124,7 @@ void TcpCacheStoreServiceImpl::blockReadImpl(::google::protobuf::RpcController* 
 
             auto src_tensor = torch::from_blob((void*)block_info.addr(),
                                                {(int64_t)block_info.len()},
-                                               torch::TensorOptions().dtype(torch::kUInt8).device(torch::kCUDA));
+                                               torch::TensorOptions().dtype(torch::kUInt8).device(kCacheStoreGpuDevice));
 
             auto tmp_buffer = static_cast<char*>(malloc(block_info.len()));
             auto dst_tensor = torch::from_blob(tmp_buffer,
