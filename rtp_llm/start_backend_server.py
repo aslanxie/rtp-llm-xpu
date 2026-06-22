@@ -449,20 +449,13 @@ def start_backend_server(
 
     pc = py_env_configs.parallelism_config
 
-    # XPU has no multi-rank distributed backend yet. Fail-fast for ANY
-    # world_size>1 (including the single-card device_count==1 case, which would
-    # otherwise fall through to local_rank_start and silently mis-run). Set
-    # XPU_ENABLE_MULTI_RANK=1 to opt in once XPU distributed is supported.
-    if (
-        _is_xpu_device()
-        and pc.world_size > 1
-        and os.environ.get("XPU_ENABLE_MULTI_RANK") != "1"
-    ):
+    # XPU multi-rank requires oneCCL/xccl distributed backend.
+    # Fail-fast when world_size>1 on XPU until DP/PP paths are validated.
+    if _is_xpu_device() and pc.world_size > 1:
         raise RuntimeError(
             f"XPU multi-rank startup (world_size={pc.world_size}, "
             f"device_count={gpu_device_count()}) is not supported yet. "
-            "Run with world_size=1, or set XPU_ENABLE_MULTI_RANK=1 to "
-            "force the multi-rank path once XPU distributed is available."
+            "Run with world_size=1."
         )
 
     # Guard against a 0-device backend (e.g. RTP_LLM_DEVICE_TYPE override points
