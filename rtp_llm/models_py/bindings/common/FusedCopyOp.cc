@@ -35,6 +35,7 @@ void fusedCopy(const FusedD2DCopyParams& params) {
     sycl::queue& queue = c10::xpu::getCurrentXPUStream();
     for (int i = 0; i < params.num_copies; ++i) {
         RTP_LLM_CHECK(params.dst[i] != nullptr && params.src[i] != nullptr);
+        if (params.size[i] == 0) continue;
         queue.memcpy(params.dst[i], params.src[i], params.size[i]);
     }
 #else
@@ -57,6 +58,7 @@ void fusedStridedCopy(const FusedStridedCopyParams& params) {
     sycl::queue& queue = c10::xpu::getCurrentXPUStream();
     for (int i = 0; i < params.num_copies; ++i) {
         RTP_LLM_CHECK(params.dst[i] != nullptr && params.src[i] != nullptr);
+        if (params.num_rows[i] == 0 || params.row_bytes[i] == 0) continue;
         const char* src_base = static_cast<const char*>(params.src[i]);
         char*       dst_base = static_cast<char*>(params.dst[i]);
         if (params.src_row_stride[i] == params.row_bytes[i]

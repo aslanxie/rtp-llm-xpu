@@ -122,9 +122,11 @@ class QKRMSNorm(nn.Module):
 
             return hidden_states
         
-        q, k, v = hidden_states.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
-        q, k = self._apply_qk_norm(q, k)
-        return torch.cat([q, k, v], dim=-1)
+        q_slice, k_slice, _ = hidden_states.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        q, k = self._apply_qk_norm(q_slice, k_slice)
+        q_slice.copy_(q)
+        k_slice.copy_(k)
+        return hidden_states
 
 # FusedQKRMSNorm - same as QKRMSNorm for XPU (no special fused kernel)
 FusedQKRMSNorm = QKRMSNorm

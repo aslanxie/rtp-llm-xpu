@@ -70,9 +70,16 @@ class XpuSdpaPrefillImpl(FMHAImplBase):
 
     def forward(self, qkv, kv_cache=None, layer_idx=0):
         total_tokens = qkv.shape[0]
+        # Compute max_pos_hint to avoid per-layer D2H sync in _apply_rope
+        max_pos_hint = None
+        if self.need_rope:
+            pos_ids = getattr(self.attn_inputs, "position_ids", None)
+            if pos_ids is not None and pos_ids.numel() > 0:
+                pos_cpu = pos_ids if pos_ids.is_cpu else pos_ids.cpu()
+                max_pos_hint = int(pos_cpu.max())
         q, k, v = _split_qkv_and_rope(
             qkv, self.attn_inputs, self.num_heads, self.num_kv_heads,
-            self.head_dim, self.rope_config, self.need_rope,
+            self.head_dim, self.rope_config, self.need_rope, max_pos_hint=max_pos_hint,
         )
 
         # Write K,V to paged cache for future decode steps.
@@ -80,13 +87,13 @@ class XpuSdpaPrefillImpl(FMHAImplBase):
         # tokens must be written at offset = prefix_lengths[i], not 0, or they
         # will clobber the cached prefix blocks at the wrong positions.
         if kv_cache is not None:
-            block_ids_all = getattr(self.attn_inputs, 'kv_cache_kernel_block_id_device', None)
+            block_ids_all = getattr(self.attn_inputs, 'kv_cache_kernel_block_id_host', None)
             if block_ids_all is None:
-                block_ids_all = getattr(self.attn_inputs, 'kv_cache_kernel_block_id_host', None)
-            if block_ids_all is None:
-                block_ids_all = self.attn_inputs.kv_cache_block_id_device
+                block_ids_all = getattr(self.attn_inputs, 'kv_cache_kernel_block_id_device', None)
             if block_ids_all is None:
                 block_ids_all = self.attn_inputs.kv_cache_block_id_host
+            if block_ids_all is None:
+                block_ids_all = self.attn_inputs.kv_cache_block_id_device
             if block_ids_all is None or block_ids_all.numel() == 0:
                 # Fail fast instead of silently skipping the KV write, which
                 # would leave the paged cache empty and corrupt later decode
@@ -94,27 +101,26 @@ class XpuSdpaPrefillImpl(FMHAImplBase):
                 raise RuntimeError(
                     "XPU SDPA prefill: kv_cache is present but no block IDs available. "
                     "Cannot write KV to paged cache without block table.")
-            if block_ids_all is not None and block_ids_all.numel() > 0:
-                input_lengths = self.attn_inputs.input_lengths
-                prefix_lengths = getattr(self.attn_inputs, 'prefix_lengths', None)
-                pl_cpu = prefix_lengths.cpu() if (prefix_lengths is not None and prefix_lengths.numel() > 0) else None
-                if input_lengths is not None and input_lengths.numel() > 1:
-                    in_cpu = input_lengths.cpu()
-                    offsets = torch.cat([torch.zeros(1, dtype=torch.int32), in_cpu.cumsum(0)])
-                    for req_idx in range(in_cpu.numel()):
-                        start = int(offsets[req_idx])
-                        end = int(offsets[req_idx + 1])
-                        bids = block_ids_all[req_idx].cpu()
-                        start_pos = int(pl_cpu[req_idx]) if pl_cpu is not None and pl_cpu.numel() > req_idx else 0
-                        _write_to_paged_cache(
-                            k[start:end], v[start:end], kv_cache, bids, start_pos,
-                            self.num_kv_heads, self.head_dim,
-                        )
-                else:
-                    bids = block_ids_all[0].cpu()
-                    start_pos = int(pl_cpu[0]) if pl_cpu is not None and pl_cpu.numel() > 0 else 0
-                    _write_to_paged_cache(k, v, kv_cache, bids, start_pos,
-                                          self.num_kv_heads, self.head_dim)
+            input_lengths = self.attn_inputs.input_lengths
+            prefix_lengths = getattr(self.attn_inputs, 'prefix_lengths', None)
+            pl_cpu = prefix_lengths.cpu() if (prefix_lengths is not None and prefix_lengths.numel() > 0) else None
+            if input_lengths is not None and input_lengths.numel() > 1:
+                in_cpu = input_lengths.cpu()
+                offsets = torch.cat([torch.zeros(1, dtype=torch.int32), in_cpu.cumsum(0)])
+                for req_idx in range(in_cpu.numel()):
+                    start = int(offsets[req_idx])
+                    end = int(offsets[req_idx + 1])
+                    bids = block_ids_all[req_idx].cpu()
+                    start_pos = int(pl_cpu[req_idx]) if pl_cpu is not None and pl_cpu.numel() > req_idx else 0
+                    _write_to_paged_cache(
+                        k[start:end], v[start:end], kv_cache, bids, start_pos,
+                        self.num_kv_heads, self.head_dim,
+                    )
+            else:
+                bids = block_ids_all[0].cpu()
+                start_pos = int(pl_cpu[0]) if pl_cpu is not None and pl_cpu.numel() > 0 else 0
+                _write_to_paged_cache(k, v, kv_cache, bids, start_pos,
+                                      self.num_kv_heads, self.head_dim)
 
             # PD disaggregation: notify cache_store the KV blocks are ready.
             common.apply_write_cache_store(

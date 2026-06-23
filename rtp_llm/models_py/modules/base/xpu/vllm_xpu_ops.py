@@ -170,6 +170,10 @@ def flash_attn_varlen(q, k, v, cu_seqlens_q, cu_seqlens_k,
                 "flash_attn_varlen SDPA fallback does not support block_table (paged KV cache). "
                 "Install vllm-xpu-kernels to enable paged attention on XPU."
             )
+        if seqused_k is not None:
+            raise RuntimeError(
+                "flash_attn_varlen SDPA fallback does not support seqused_k. "
+                "Install vllm-xpu-kernels to enable this feature on XPU.")
         return _sdpa_varlen_fallback(q, k, v, cu_seqlens_q, cu_seqlens_k,
                                      max_seqlen_q, max_seqlen_k, softmax_scale, causal)
 
