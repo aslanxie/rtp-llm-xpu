@@ -7,24 +7,6 @@ from typing import List
 
 import torch
 
-# XPU C++ engine support: detect Intel GPU.  Honor an explicit device
-# override and the CUDA-priority default so the log is accurate on a mixed
-# CUDA+XPU host.  We mirror device_type's resolution here rather than importing
-# it because rtp_llm.device imports rtp_llm.ops, so importing it back would be
-# circular.
-_device_override = os.environ.get("RTP_LLM_DEVICE_TYPE", "").strip().lower()
-if _device_override:
-    _xpu_mode = _device_override == "xpu"
-else:
-    _xpu_mode = (
-        hasattr(torch, "xpu")
-        and torch.xpu.is_available()
-        and not torch.cuda.is_available()
-    )
-if _xpu_mode:
-    logging.info("XPU mode: using C++ engine with built .so libraries")
-
-
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 libs_path = os.path.join(parent_dir, "libs")

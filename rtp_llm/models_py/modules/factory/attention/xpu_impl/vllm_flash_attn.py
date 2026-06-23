@@ -81,6 +81,9 @@ def reset_module_caches():
     _COS_SIN_CACHE.clear()
     _PREFILL_WRITE_IDX_CACHE.clear()
     _arange_cache.clear()
+    # Also drop the per-stream decode KV gather scratch buffers; these are GPU
+    # tensors retained on the decode impl and would otherwise leak on unload.
+    XpuVllmDecodeImpl.reset_decode_scratch()
 
 _VLLM_ROPE = None
 _VLLM_ROPE_CHECKED = False
@@ -460,7 +463,7 @@ class XpuVllmPrefillImpl(FMHAImplBase):
 
         # Per-sequence position IDs (with prefix offsets) are derived inside
         # _split_qkv_and_rope via _build_prefill_positions when position_ids
-        # is None.  Single source of truth shared with XpuSdpaPrefillImpl.
+        # is None.  Single source of truth for KV-block id resolution.
 
         q, k, v = _split_qkv_and_rope(
             qkv, self.attn_inputs, self.num_heads, self.num_kv_heads,
@@ -587,8 +590,9 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         kv_dt = getattr(attn_configs, 'kv_cache_dtype', None)
         if kv_dt is not None and kv_dt != KvCacheDataType.BASE:
             return False
-        # Requires FA2 (flash_attn_varlen); fall back to XpuSdpaDecodeImpl
-        # when FA2 is not installed, rather than crashing at forward() time.
+        # Requires FA2 (flash_attn_varlen).  When FA2 is not installed
+        # no XPU decode impl supports this config (the factory fails fast),
+        # matching the CUDA/ROCm "no kernel -> not supported" contract.
         if not _is_fa2_available():
             return False
         rope_style = getattr(getattr(attn_configs, "rope_config", None), "style", RopeStyle.No)
