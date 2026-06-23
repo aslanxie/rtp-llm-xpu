@@ -36,6 +36,9 @@ class XpuSdpaPrefillImpl(FMHAImplBase):
         self.attn_inputs = attn_inputs
         self.num_heads = attn_configs.head_num
         self.num_kv_heads = attn_configs.kv_head_num
+        assert self.num_kv_heads > 0 and self.num_heads % self.num_kv_heads == 0, (
+            f"SDPA: num_heads ({self.num_heads}) must be divisible by "
+            f"num_kv_heads ({self.num_kv_heads}) for GQA head replication")
         self.head_dim = attn_configs.size_per_head
         self.rope_config = attn_configs.rope_config
         self.need_rope = _need_rope(attn_configs)
@@ -161,6 +164,9 @@ class XpuSdpaDecodeImpl(FMHAImplBase):
         self.attn_inputs = attn_inputs
         self.num_heads = attn_configs.head_num
         self.num_kv_heads = attn_configs.kv_head_num
+        assert self.num_kv_heads > 0 and self.num_heads % self.num_kv_heads == 0, (
+            f"SDPA: num_heads ({self.num_heads}) must be divisible by "
+            f"num_kv_heads ({self.num_kv_heads}) for GQA head replication")
         self.head_dim = attn_configs.size_per_head
         self.rope_config = attn_configs.rope_config
         self.need_rope = _need_rope(attn_configs)
@@ -242,15 +248,23 @@ class XpuSdpaDecodeImpl(FMHAImplBase):
 
         # Batched decode: process each request independently
         block_ids_all = self._get_block_ids(self.attn_inputs)
-        # Ensure block_ids is 2D [num_requests, max_blocks] for correct per-request slicing.
-        if block_ids_all is not None and block_ids_all.dim() == 1 and num_requests > 1:
-            block_ids_all = block_ids_all.reshape(num_requests, -1)
-        seq_lens_cpu = seq_lengths if seq_lengths.is_cpu else seq_lengths.cpu()
-        outputs = []
         if block_ids_all is None:
             raise RuntimeError(
                 "SDPA decode: kv_cache is present but no block IDs found. "
                 "Cannot read KV history without block table.")
+        # Ensure block_ids is 2D [num_requests, max_blocks] for correct per-request slicing.
+        if block_ids_all.dim() == 1:
+            if block_ids_all.numel() % num_requests != 0:
+                raise RuntimeError(
+                    f"SDPA decode: flat block_ids of length {block_ids_all.numel()} is not "
+                    f"divisible by num_requests={num_requests}; cannot infer the per-request "
+                    f"block table. Provide a 2D [num_requests, max_blocks] block table instead.")
+            block_ids_all = block_ids_all.reshape(num_requests, -1)
+        # Hoist the host transfer out of the loop: a per-request .cpu() forces a
+        # device->host sync every iteration, serializing the whole batched decode.
+        block_ids_cpu = block_ids_all if block_ids_all.is_cpu else block_ids_all.cpu()
+        seq_lens_cpu = seq_lengths if seq_lengths.is_cpu else seq_lengths.cpu()
+        outputs = []
 
         for i in range(num_requests):
             start_pos = int(seq_lens_cpu[i].item())
@@ -258,7 +272,7 @@ class XpuSdpaDecodeImpl(FMHAImplBase):
             ki = k_new[i:i+1]   # [1, kv_heads, head_dim]
             vi = v_new[i:i+1]
                 
-            bids = block_ids_all[i].cpu() if block_ids_all.dim() > 1 else block_ids_all.cpu()
+            bids = block_ids_cpu[i]
             _write_to_paged_cache(ki, vi, kv_cache, bids, start_pos,
                                   self.num_kv_heads, self.head_dim)
             total_len = start_pos + 1

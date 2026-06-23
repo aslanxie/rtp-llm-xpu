@@ -87,21 +87,22 @@ torch_ext::PyAttentionInputs PyWrappedModel::buildPyAttentionInputs(const GptMod
     py_attn_inputs.sequence_lengths = inputs.sequence_lengths;
     py_attn_inputs.input_lengths    = inputs.input_lengths;
 
+    // Pinned (page-locked) host memory speeds up H2D copies on CUDA/ROCm, but
+    // XPU does not support it. Resolve once via preprocessor for all sites below.
 #if USING_XPU
-    if (inputs.kv_cache_kernel_block_id.defined()) {
-        py_attn_inputs.kv_cache_kernel_block_id_host = inputs.kv_cache_kernel_block_id.clone();
-    }
-    if (inputs.kv_cache_block_id.defined()) {
-        py_attn_inputs.kv_cache_block_id_host = inputs.kv_cache_block_id.clone();
-    }
+    constexpr bool kPinHostMem = false;
 #else
+    constexpr bool kPinHostMem = true;
+#endif
+
     if (inputs.kv_cache_kernel_block_id.defined()) {
-        py_attn_inputs.kv_cache_kernel_block_id_host = inputs.kv_cache_kernel_block_id.clone().pin_memory();
+        auto t = inputs.kv_cache_kernel_block_id.clone();
+        py_attn_inputs.kv_cache_kernel_block_id_host = kPinHostMem ? t.pin_memory() : t;
     }
     if (inputs.kv_cache_block_id.defined()) {
-        py_attn_inputs.kv_cache_block_id_host = inputs.kv_cache_block_id.clone().pin_memory();
+        auto t = inputs.kv_cache_block_id.clone();
+        py_attn_inputs.kv_cache_block_id_host = kPinHostMem ? t.pin_memory() : t;
     }
-#endif
     if (inputs.kv_cache_layer_to_group.defined()) {
         py_attn_inputs.kv_cache_layer_to_group = inputs.kv_cache_layer_to_group;
     }
@@ -141,9 +142,9 @@ torch_ext::PyAttentionInputs PyWrappedModel::buildPyAttentionInputs(const GptMod
 
     if (context_batch_size > 0) {
         torch::Tensor cu_seqlens =
-            torch::zeros({batch_size + 1}, torch::TensorOptions(torch::kInt32).device(torch::kCPU).pinned_memory(!USING_XPU));
+            torch::zeros({batch_size + 1}, torch::TensorOptions(torch::kInt32).device(torch::kCPU).pinned_memory(kPinHostMem));
         torch::Tensor cu_kv_seqlens =
-            torch::zeros({batch_size + 1}, torch::TensorOptions(torch::kInt32).device(torch::kCPU).pinned_memory(!USING_XPU));
+            torch::zeros({batch_size + 1}, torch::TensorOptions(torch::kInt32).device(torch::kCPU).pinned_memory(kPinHostMem));
 
         cu_seqlens.slice(0, 1, context_batch_size + 1) = py_attn_inputs.input_lengths.cumsum(0);
         cu_kv_seqlens.slice(0, 1, context_batch_size + 1) =
@@ -157,7 +158,7 @@ torch_ext::PyAttentionInputs PyWrappedModel::buildPyAttentionInputs(const GptMod
     } else {
         py_attn_inputs.total_tokens = 0;
         py_attn_inputs.cu_seqlens_host =
-            torch::zeros({batch_size + 1}, torch::TensorOptions(torch::kInt32).device(torch::kCPU).pinned_memory(!USING_XPU));
+            torch::zeros({batch_size + 1}, torch::TensorOptions(torch::kInt32).device(torch::kCPU).pinned_memory(kPinHostMem));
         py_attn_inputs.cu_seqlens =
             torch::zeros({batch_size + 1}, torch::TensorOptions(torch::kInt32).device(getTorchDevice()));
         py_attn_inputs.cu_kv_seqlens =
@@ -166,7 +167,7 @@ torch_ext::PyAttentionInputs PyWrappedModel::buildPyAttentionInputs(const GptMod
             torch::arange(0,
                           py_attn_inputs.sequence_lengths.size(0) + 1,
                           1,
-                          torch::TensorOptions(torch::kInt32).device(torch::kCPU).pinned_memory(!USING_XPU));
+                          torch::TensorOptions(torch::kInt32).device(torch::kCPU).pinned_memory(kPinHostMem));
         py_attn_inputs.decode_cu_seqlens_host = decode_cu_seqlens;
         py_attn_inputs.decode_cu_seqlens_d    = tensorHoldHostAndToCuda(decode_cu_seqlens);
     }
@@ -176,19 +177,11 @@ torch_ext::PyAttentionInputs PyWrappedModel::buildPyAttentionInputs(const GptMod
     py_attn_inputs.input_lengths_d  = tensorHoldHostAndToCuda(py_attn_inputs.input_lengths);
 
     // In qwen3-next target verify mode, sequence_lengths_plus_1_d uses prefix_lengths
-    if (py_attn_inputs.is_target_verify) {
-#if USING_XPU
-        auto sequence_lengths_plus_1             = (py_attn_inputs.prefix_lengths + 1);
-#else
-        auto sequence_lengths_plus_1             = (py_attn_inputs.prefix_lengths + 1).pin_memory();
-#endif
-        py_attn_inputs.sequence_lengths_plus_1_d = tensorHoldHostAndToCuda(sequence_lengths_plus_1);
-    } else {
-#if USING_XPU
-        auto sequence_lengths_plus_1             = (py_attn_inputs.sequence_lengths + 1);
-#else
-        auto sequence_lengths_plus_1             = (py_attn_inputs.sequence_lengths + 1).pin_memory();
-#endif
+    {
+        const auto& base = py_attn_inputs.is_target_verify
+                               ? py_attn_inputs.prefix_lengths
+                               : py_attn_inputs.sequence_lengths;
+        auto sequence_lengths_plus_1 = kPinHostMem ? (base + 1).pin_memory() : (base + 1);
         py_attn_inputs.sequence_lengths_plus_1_d = tensorHoldHostAndToCuda(sequence_lengths_plus_1);
     }
 

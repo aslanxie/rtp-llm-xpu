@@ -370,6 +370,10 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
         const auto& rep_pen  = params.repetition_penalty.value();
         const auto& pres_pen = params.presence_penalty.value();
         const auto& freq_pen = params.frequency_penalty.value();
+        // These tensors, along with sequence_lengths/input_lengths, are dereferenced on
+        // the host via data_ptr below; ensure they all live on CPU before reading them.
+        RTP_LLM_CHECK(rep_pen.is_cpu() && pres_pen.is_cpu() && freq_pen.is_cpu());
+        RTP_LLM_CHECK(params.sequence_lengths.is_cpu() && params.input_lengths.is_cpu());
         for (int64_t b = 0; b < batch_size; b++) {
             float rp = rep_pen.data_ptr<float>()[b];
             float pp = pres_pen.data_ptr<float>()[b];
@@ -496,7 +500,10 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
     }
 
     // 6. Apply top_p filtering
-    auto top_p_ptr = params.top_p.data_ptr<float>();
+    // Operate on a private copy: params.top_p is conceptually an input and may be
+    // reused by the caller, but the std::transform below rewrites it in place.
+    auto top_p_host = params.top_p.clone();
+    auto top_p_ptr  = top_p_host.data_ptr<float>();
     std::transform(top_p_ptr, top_p_ptr + batch_size, top_p_ptr, [](float t) { return std::abs(t) < 1e-7f ? 1.0f : t; });
     bool has_top_p = !std::all_of(top_p_ptr, top_p_ptr + batch_size, [](float t) { return std::abs(t - 1.0f) < 1e-7f; });
     if (has_top_p) {

@@ -66,10 +66,17 @@ size_t MemoryEvaluationHelper::getDefaultRuntimeMemorySize(const RuntimeConfig& 
     {
         auto device_idx = static_cast<c10::DeviceIndex>(c10::xpu::current_device());
         auto* props = at::xpu::getDeviceProperties(device_idx);
+        RTP_LLM_CHECK_WITH_INFO(props != nullptr,
+                                "at::xpu::getDeviceProperties returned null for device " +
+                                    std::to_string(device_idx));
         total_gpu_bytes = props->global_mem_size;
         auto stats = c10::xpu::XPUCachingAllocator::getDeviceStats(device_idx);
-        size_t used = stats.allocated_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].current;
-        free_gpu_bytes = (total_gpu_bytes > used) ? (total_gpu_bytes - used) : 0;
+        // Match getGpuExecStatus(): use reserved_bytes (memory the caching allocator
+        // holds from the driver), not allocated_bytes (the live subset), so the two
+        // memory accounting paths stay consistent.
+        size_t reserved =
+            stats.reserved_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].current;
+        free_gpu_bytes = (total_gpu_bytes > reserved) ? (total_gpu_bytes - reserved) : 0;
     }
 #endif
     const auto minimal_runtime_bytes = std::max(2048L * 1024 * 1024, (long)(total_gpu_bytes * 0.05));

@@ -132,7 +132,7 @@ try:
             cdll.LoadLibrary(_libpython_path)
             logging.info(f"loaded {_ldlibrary} from {_libdir}")
         else:
-            logging.debug(f"libpython not found at {_libpython_path}, skipping preload")
+            logging.warning(f"libpython not found at {_libpython_path}, skipping preload")
     else:
         logging.debug("sysconfig LIBDIR/LDLIBRARY not available, skipping libpython preload")
 except Exception as e:
