@@ -399,6 +399,7 @@ ExecStatus getGpuExecStatus() {
     {
         auto device_idx = static_cast<c10::DeviceIndex>(g_device_id);
         auto* props = at::xpu::getDeviceProperties(device_idx);
+        RTP_LLM_CHECK_WITH_INFO(props != nullptr, "at::xpu::getDeviceProperties returned null for device " + std::to_string(device_idx));
         total_bytes = props->global_mem_size;
         auto stats = c10::xpu::XPUCachingAllocator::getDeviceStats(device_idx);
         size_t reserved = stats.reserved_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].current;

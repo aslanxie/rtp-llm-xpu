@@ -7,6 +7,16 @@
 
 using namespace std;
 
+namespace {
+inline torch::Tensor maybePinMemory(torch::Tensor t) {
+#if !USING_XPU
+    return t.pin_memory();
+#else
+    return t;
+#endif
+}
+}  // namespace
+
 namespace rtp_llm {
 
 void EplbPlanBuffers::init(size_t    log_exp_num,
@@ -21,9 +31,9 @@ void EplbPlanBuffers::init(size_t    log_exp_num,
 
     layer_id_buf          = torch::zeros({1}, gpu_i32);
     logic_expert_cnt      = torch::zeros({(int64_t)log_exp_num}, gpu_i32);
-    logic_expert_cnt_host = torch::zeros({(int64_t)log_exp_num}, cpu_i32).pin_memory();
+    logic_expert_cnt_host = maybePinMemory(torch::zeros({(int64_t)log_exp_num}, cpu_i32));
     log2phy               = torch::zeros({(int64_t)log_exp_num, (int64_t)(phy_exp_num - log_exp_num + 1)}, gpu_i32);
-    log2phy_host = torch::zeros({(int64_t)log_exp_num, (int64_t)(phy_exp_num - log_exp_num + 1)}, cpu_i32).pin_memory();
+    log2phy_host = maybePinMemory(torch::zeros({(int64_t)log_exp_num, (int64_t)(phy_exp_num - log_exp_num + 1)}, cpu_i32));
     phy2log      = torch::zeros({(int64_t)phy_exp_num}, gpu_i32);
 
     size_t expert_per_ep = phy_exp_num / ep_size;
@@ -70,7 +80,7 @@ void BalanceStatsBuffers::reset() {
 void LoadFlags::init() {
     flag_gpu  = torch::zeros({1}, torch::TensorOptions(torch::kInt32).device(getTorchDevice()));
     flag_sync = torch::zeros({1}, torch::TensorOptions(torch::kInt32).device(getTorchDevice()));
-    flag_host = torch::zeros({1}, torch::kInt32).pin_memory();
+    flag_host = maybePinMemory(torch::zeros({1}, torch::kInt32));
 }
 
 void LoadFlags::setReady(bool ready) {
@@ -96,7 +106,7 @@ void EplbController::init(const EPLBConfig& eplb_control_data, const EPLBConfig&
     RTP_LLM_LOG_INFO("EPLB control step: %d", control_step);
 
     auto eplb_control_data_list  = eplb_control_data.toList();
-    eplb_control_data_buf_host   = torch::zeros({(int64_t)eplb_control_data_list.size()}, torch::kInt32).pin_memory();
+    eplb_control_data_buf_host   = maybePinMemory(torch::zeros({(int64_t)eplb_control_data_list.size()}, torch::kInt32));
     eplb_control_data_buf_device = torch::zeros({(int64_t)eplb_control_data_list.size()},
                                                 torch::TensorOptions(torch::kInt32).device(getTorchDevice()));
 }
