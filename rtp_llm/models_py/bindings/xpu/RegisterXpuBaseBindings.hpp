@@ -519,8 +519,9 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                           "fast_topk_v2: lengths must be 1-D with length equal to score.size(0)=", score.size(0),
                           ", got shape [", lengths.sizes(), "]");
                       // Validate lengths values are in [0, score.size(-1)].
-                      auto len_cpu = lengths.to(at::kCPU);
-                      auto* len_ptr = len_cpu.data_ptr<int64_t>();
+                      // lengths is int32 (matching CUDA FastTopKParams::lengths).
+                      auto len_cpu = lengths.to(at::kCPU).to(at::kInt);
+                      auto* len_ptr = len_cpu.data_ptr<int32_t>();
                       for (int64_t i = 0; i < len_cpu.size(0); i++) {
                           TORCH_CHECK(len_ptr[i] >= 0 && len_ptr[i] <= score.size(-1),
                               "fast_topk_v2: lengths[", i, "]=", len_ptr[i],

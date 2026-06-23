@@ -236,6 +236,9 @@ class XpuSdpaDecodeImpl(FMHAImplBase):
 
         # Batched decode: process each request independently
         block_ids_all = self._get_block_ids(self.attn_inputs)
+        # Ensure block_ids is 2D [num_requests, max_blocks] for correct per-request slicing.
+        if block_ids_all is not None and block_ids_all.dim() == 1 and num_requests > 1:
+            block_ids_all = block_ids_all.reshape(num_requests, -1)
         seq_lens_cpu = seq_lengths if seq_lengths.is_cpu else seq_lengths.cpu()
         outputs = []
         for i in range(num_requests):
