@@ -265,13 +265,9 @@ void runtimeCopy(const CopyParams& params) {
 }
 
 void multiMergeCopy(const MultiMergeCopyParams& params) {
-    // src_ptrs and dst_ptr are device pointers — use HIP async memcpy,
-    // not std::memcpy which is undefined behaviour on device memory.
-    hipStream_t stream = at::hip::getCurrentHIPStream();
     for (size_t i = 0; i < params.src_ptrs.size(); i++) {
         auto dst = static_cast<char*>(params.dst_ptr) + params.dst_offsets[i];
-        hipMemcpyAsync(dst, params.src_ptrs[i], params.copy_size[i],
-                       hipMemcpyDeviceToDevice, stream);
+        std::memcpy(dst, params.src_ptrs[i], params.copy_size[i]);
     }
 }
 

@@ -772,7 +772,7 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
         // torch::multinomial is well-tested and handles all cases correctly.
         //
         // Apply top_k filtering if needed
-        auto filtered_probs = probs_t.clone();
+        auto filtered_probs = probs_t;
         bool has_top_k      = !std::all_of(top_k_ptr, top_k_ptr + batch_size, [](auto t) { return t <= 0; });
         if (has_top_k) {
             for (int64_t b = 0; b < (int64_t)batch_size; b++) {
@@ -801,18 +801,10 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
                 }
             }
         }
-        // Re-normalize and sample, with degenerate-row protection.
+        // Re-normalize and sample
         auto row_sums  = filtered_probs.sum(-1, /*keepdim=*/true);
-        auto row_valid = (row_sums.squeeze(-1) > 1e-10) & torch::isfinite(row_sums.squeeze(-1));
         filtered_probs = filtered_probs / row_sums.clamp_min(1e-10);
-        // For rows with valid probability distribution, use multinomial;
-        // for degenerate rows (all-zero / NaN after top_k+top_p), fall back to argmax.
-        auto selected = torch::argmax(probs_t, -1, /*keepdim=*/false);
-        if (row_valid.any().item<bool>()) {
-            auto valid_probs = filtered_probs.index({row_valid});
-            auto sampled = torch::multinomial(valid_probs, 1, /*replacement=*/false).squeeze(-1);
-            selected.index_put_({row_valid}, sampled);
-        }
+        auto selected  = torch::multinomial(filtered_probs, 1, /*replacement=*/false).squeeze(-1);
         samples_t.copy_(selected);
         if (need_renorm_probs) {
             output_all_probs_t.copy_(filtered_probs);
@@ -826,10 +818,7 @@ GreedyOutput sampleGreedy(const GreedyParams& params) {
     // 7. Update cum_log_probs
     if (params.cum_log_probs.has_value()) {
         auto cum_log_probs_t = params.cum_log_probs.value();
-        // Gather only the selected token's probability (probs_t is [batch, vocab]),
-        // not the full row, to match cum_log_probs_t shape [batch].
-        auto token_prob = probs_t.gather(1, samples_t.unsqueeze(-1).to(torch::kLong)).squeeze(1);
-        cum_log_probs_t.add_(token_prob.log().to(cum_log_probs_t.device()));
+        cum_log_probs_t.add_(probs_t.log());
     }
 
     // 8. Copy results back
