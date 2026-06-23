@@ -106,6 +106,8 @@ void runtimeSyncAndCheck() {
 #elif USING_XPU
 
 void runtimeSyncAndCheck() {
+    // PyTorch XPU's synchronize() internally checks for SYCL async errors
+    // and throws on failure, so no separate error check is needed here.
     c10::xpu::getCurrentXPUStream().synchronize();
 }
 
@@ -350,7 +352,10 @@ void cudaCheckLastError() {
         RTP_LLM_LOG_ERROR("ROCm error: %s", hipGetErrorString(err));
     }
 #elif USING_XPU
-    // XPU: error checking handled by PyTorch XPU runtime.
+    // XPU/SYCL: errors are reported either via synchronous exceptions at
+    // submit time or via the async error handler on queue.wait(). PyTorch's
+    // XPU runtime installs an async handler that throws on errors, so
+    // explicit error polling is unnecessary here.
 #endif
 }
 
@@ -405,18 +410,21 @@ ExecStatus getGpuExecStatus() {
         // over-allocating into space that is actually occupied externally. The
         // ratio is overridable via XPU_MEM_RESERVE_RATIO (in [0, 1)); prefer
         // setting kv_cache_mem_mb explicitly when exact control is required.
-        double reserve_ratio = 0.10;
-        const char* ratio_env = std::getenv("XPU_MEM_RESERVE_RATIO");
-        if (ratio_env != nullptr) {
-            char* endptr = nullptr;
-            double parsed = std::strtod(ratio_env, &endptr);
-            if (endptr != ratio_env && *endptr == '\0' && parsed >= 0.0 && parsed < 1.0) {
-                reserve_ratio = parsed;
-            } else {
-                RTP_LLM_LOG_WARNING("Invalid XPU_MEM_RESERVE_RATIO='%s', using default %.2f",
-                                    ratio_env, reserve_ratio);
+        static const double reserve_ratio = []() {
+            double ratio = 0.10;
+            const char* env = std::getenv("XPU_MEM_RESERVE_RATIO");
+            if (env != nullptr) {
+                char* endptr = nullptr;
+                double parsed = std::strtod(env, &endptr);
+                if (endptr != env && *endptr == '\0' && parsed >= 0.0 && parsed < 1.0) {
+                    ratio = parsed;
+                } else {
+                    RTP_LLM_LOG_WARNING("Invalid XPU_MEM_RESERVE_RATIO='%s', using default %.2f",
+                                        env, ratio);
+                }
             }
-        }
+            return ratio;
+        }();
         size_t external_headroom = static_cast<size_t>(total_bytes * reserve_ratio);
         mem.free_bytes = (raw_free > external_headroom) ? (raw_free - external_headroom) : 0;
         // NOTE: Do NOT set max_consumed_bytes here.  The AGGREGATE peak from

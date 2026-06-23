@@ -16,5 +16,7 @@ def get_num_device_sms() -> int:
 
 
 def get_sm(device_id: int = 0) -> Tuple[int, int]:
+    if not is_cuda():
+        raise NotImplementedError("get_sm() is only supported on CUDA devices")
     major, minor = torch.cuda.get_device_capability(device_id)
     return major, minor

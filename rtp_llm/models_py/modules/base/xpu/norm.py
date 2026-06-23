@@ -17,9 +17,13 @@ try:
     from rtp_llm.models_py.modules.base.xpu.vllm_xpu_ops import is_available as _vllm_available
 except ImportError:
     _vllm_available = lambda: False
+
+
 def _can_use_vllm(tensor: torch.Tensor) -> bool:
     """Check if vllm-xpu-kernels ops can run on this tensor's device."""
     return _vllm_available() and tensor.is_xpu
+
+
 class RMSNorm(BaseNorm):
     """XPU RMSNorm using vllm-xpu-kernels."""
 
@@ -44,6 +48,8 @@ class RMSNorm(BaseNorm):
             output.copy_(result)
             return output
         return result
+
+
 class RMSResNorm(BaseResNorm):
     """XPU fused add + RMSNorm.
 
@@ -71,6 +77,8 @@ class RMSResNorm(BaseResNorm):
         result = (self.weight * normed).to(input_dtype)
         hidden_states.copy_(result)
         return hidden_states, residual
+
+
 class QKRMSNorm(nn.Module):
     """XPU QK-RMSNorm using composition of RMSNorm."""
 
@@ -130,6 +138,8 @@ class QKRMSNorm(nn.Module):
 
 # FusedQKRMSNorm - same as QKRMSNorm for XPU (no special fused kernel)
 FusedQKRMSNorm = QKRMSNorm
+
+
 class AddBiasResLayerNorm(BaseAddBiasResLayerNorm):
     """XPU AddBiasResLayerNorm with empty-bias guard.
 
@@ -150,8 +160,8 @@ class AddBiasResLayerNorm(BaseAddBiasResLayerNorm):
         input_dtype = hidden_states.dtype
         hidden_states = hidden_states.to(torch.float32)
         mean = hidden_states.mean(dim=-1, keepdim=True)
-        squared_sum = (hidden_states**2).mean(dim=-1, keepdim=True)
+        variance = (hidden_states - mean).pow(2).mean(dim=-1, keepdim=True)
         x_normalized = (hidden_states - mean) / torch.sqrt(
-            (squared_sum - (mean**2)) + self.variance_epsilon
+            variance + self.variance_epsilon
         )
         return (self.weight * x_normalized + self.beta).to(input_dtype)

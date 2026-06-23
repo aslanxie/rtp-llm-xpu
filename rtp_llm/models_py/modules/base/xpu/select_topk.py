@@ -26,6 +26,6 @@ class SelectTopk(nn.Module):
         probs = torch.softmax(router_logits_fp32.float(), dim=-1)
         weights, ids = torch.topk(probs, self.top_k, dim=-1)
         if self.renormalize:
-            weights = weights / weights.sum(dim=-1, keepdim=True)
+            weights = weights / weights.sum(dim=-1, keepdim=True).clamp(min=1e-9)
         topk_weights.copy_(weights.to(topk_weights.dtype))
         topk_ids.copy_(ids.to(topk_ids.dtype))

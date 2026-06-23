@@ -247,16 +247,16 @@ class XpuSdpaDecodeImpl(FMHAImplBase):
             block_ids_all = block_ids_all.reshape(num_requests, -1)
         seq_lens_cpu = seq_lengths if seq_lengths.is_cpu else seq_lengths.cpu()
         outputs = []
+        if block_ids_all is None:
+            raise RuntimeError(
+                "SDPA decode: kv_cache is present but no block IDs found. "
+                "Cannot read KV history without block table.")
+
         for i in range(num_requests):
             start_pos = int(seq_lens_cpu[i].item())
             qi = q[i:i+1]       # [1, num_heads, head_dim]
             ki = k_new[i:i+1]   # [1, kv_heads, head_dim]
             vi = v_new[i:i+1]
-
-            if block_ids_all is None:
-                raise RuntimeError(
-                    "SDPA decode: kv_cache is present but no block IDs found. "
-                    "Cannot read KV history without block table.")
                 
             bids = block_ids_all[i].cpu() if block_ids_all.dim() > 1 else block_ids_all.cpu()
             _write_to_paged_cache(ki, vi, kv_cache, bids, start_pos,

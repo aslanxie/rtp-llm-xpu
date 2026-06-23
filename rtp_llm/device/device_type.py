@@ -48,10 +48,9 @@ def _resolve_device_type(override: str) -> DeviceType:
     if override:
         if override in _DEVICE_TYPE_OVERRIDE:
             return _DEVICE_TYPE_OVERRIDE[override]
-        import logging
-        logging.getLogger(__name__).warning(
-            "Ignoring unknown RTP_LLM_DEVICE_TYPE=%r; valid values: %s",
-            override, sorted(_DEVICE_TYPE_OVERRIDE))
+        raise ValueError(
+            f"Unknown RTP_LLM_DEVICE_TYPE={override!r}; valid values: "
+            f"{sorted(_DEVICE_TYPE_OVERRIDE.keys())}")
 
     xpu_available = hasattr(torch, "xpu") and torch.xpu.is_available()
     cuda_available = torch.cuda.is_available()

@@ -82,7 +82,8 @@ cc_library(name = "torch_libs")
     # reproducing the same layout as new_local_repository(path = site_packages).
     ls_result = repository_ctx.execute([
         python_bin, "-c",
-        "import os; print('\\n'.join(os.listdir('%s')))" % site_packages,
+        "import os, sys; print('\\n'.join(os.listdir(sys.argv[1])))",
+        site_packages,
     ])
     if ls_result.return_code != 0:
         fail("Failed to list site-packages: " + ls_result.stderr)

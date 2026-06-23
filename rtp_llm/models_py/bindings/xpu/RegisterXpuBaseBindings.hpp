@@ -126,6 +126,7 @@ void registerBaseXpuBindings(py::module& rtp_ops_m) {
                      int64_t m,
                      int64_t n,
                      int64_t norm_size) {
+                      (void)n;  // Unused in PyTorch fallback (from CUDA kernel signature)
                       int64_t q_size = q_group_num * norm_size;
                       int64_t k_size = k_group_num * norm_size;
                       auto q_flat = IO.narrow(0, 0, m).narrow(1, 0, q_size)

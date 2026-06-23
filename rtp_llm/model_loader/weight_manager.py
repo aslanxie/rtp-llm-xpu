@@ -116,7 +116,10 @@ class WeightManager:
         # Respect RTP_LLM_DEVICE_TYPE: only skip the CUDA stream when the
         # resolved device is actually XPU, not merely when XPU hardware exists.
         if _is_xpu_device():
-            self._working_stream = None  # XPU: streams managed by runtime
+            # XPU currently operates on a single default stream; creating a
+            # separate stream is not needed. torch.xpu.synchronize() in the
+            # update path is acceptable since weight updates are infrequent.
+            self._working_stream = None
         else:
             self._working_stream: torch.cuda.Stream = torch.cuda.Stream(
                 device=self._device,
@@ -199,6 +202,8 @@ class WeightManager:
         tensor: torch.Tensor | None = None
 
         if method == "cuda_ipc":
+            if _is_xpu_device():
+                raise ValueError("cuda_ipc is not supported on XPU; use method='shm'")
             helper = CudaIpcHelper()
             tensor = helper.build_from_meta(bytes.fromhex(desc))
         else:  # method == "shm"

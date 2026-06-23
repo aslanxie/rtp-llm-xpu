@@ -260,7 +260,7 @@ inline PyWrappedModel::PyWrappedModel(const GptModelInitParams& params,
 #elif USING_XPU
         // XPU: no CUDA graph support; just synchronize the device
         c10::impl::VirtualGuardImpl impl(c10::DeviceType::XPU);
-        impl.synchronizeStream(impl.getStream(c10::Device(c10::DeviceType::XPU)));
+        impl.synchronizeStream(impl.getStream(c10::Device(c10::DeviceType::XPU, static_cast<c10::DeviceIndex>(getDeviceId()))));
         enable_cuda_graph_ = false;
 #else
         RTP_LLM_LOG_WARNING("CUDA/HIP Graph is not supported on this platform, skipping");

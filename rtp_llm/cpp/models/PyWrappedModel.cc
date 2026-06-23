@@ -36,9 +36,13 @@ torch::Tensor PyWrappedModel::tensorHoldHostAndToCuda(const torch::Tensor& tenso
     }
 
     // NOTE: since is_pinned() operation costs a lot cpu time, we only check it when pinned_check_remaining_ > 0.
+    // XPU does not support pinned memory; fusedCopy uses SYCL queue.memcpy which
+    // works with any host allocation, so skip the pinned check entirely.
+#if !USING_XPU
     if (pinned_check_remaining_ > 0) {
         RTP_LLM_CHECK_WITH_INFO(tensor.is_pinned(), "tensor is not pinned, fused copy requires pinned memory");
     }
+#endif
 
     // create tensor on cuda
     auto cuda_tensor = torch::empty(tensor.sizes(), torch::TensorOptions(tensor.dtype()).device(getTorchDevice()));

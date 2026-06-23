@@ -245,6 +245,8 @@ WarmUpResult NormalEngine::prefillWarmUp(const EngineInitParams& params) {
     cudaDeviceSynchronize();
     c10::cuda::CUDACachingAllocator::emptyCache();
 #elif USING_XPU
+    // XPU currently uses a single stream per device; synchronizing the current
+    // stream is sufficient to ensure all work is complete before emptyCache().
     c10::xpu::getCurrentXPUStream().synchronize();
     c10::xpu::XPUCachingAllocator::emptyCache();
 #endif
@@ -283,6 +285,8 @@ WarmUpResult NormalEngine::decodeWarmUp(const EngineInitParams& params) {
     cudaDeviceSynchronize();
     c10::cuda::CUDACachingAllocator::emptyCache();
 #elif USING_XPU
+    // XPU currently uses a single stream per device; synchronizing the current
+    // stream is sufficient to ensure all work is complete before emptyCache().
     c10::xpu::getCurrentXPUStream().synchronize();
     c10::xpu::XPUCachingAllocator::emptyCache();
 #endif

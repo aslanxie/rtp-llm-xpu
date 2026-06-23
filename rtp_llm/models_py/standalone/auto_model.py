@@ -166,7 +166,8 @@ class AutoModel:
         # KV cache layout differs by device:
         #   CUDA/ROCm: [num_blocks, 2, kv_heads, tokens_per_block, head_dim]
         #   XPU:       [num_blocks, 2, tokens_per_block, kv_heads, head_dim]
-        if str(self.device).startswith("xpu"):
+        from rtp_llm.device.device_impl import _is_xpu_device
+        if _is_xpu_device():
             per_layer_shape = [
                 self.block_nums, 2,
                 self.tokens_per_block, self.kv_head_num, self.size_per_head,

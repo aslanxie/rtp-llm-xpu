@@ -76,6 +76,29 @@ _COS_SIN_CACHE: OrderedDict = OrderedDict()
 _COS_SIN_CACHE_MAX_SIZE = 32
 
 
+def reset_module_caches():
+    """Release all module-level GPU tensor caches. Call on model unload."""
+    _COS_SIN_CACHE.clear()
+    _PREFILL_WRITE_IDX_CACHE.clear()
+    _arange_cache.clear()
+
+_VLLM_ROPE = None
+_VLLM_ROPE_CHECKED = False
+
+def _get_vllm_rope():
+    global _VLLM_ROPE, _VLLM_ROPE_CHECKED
+    if not _VLLM_ROPE_CHECKED:
+        _VLLM_ROPE_CHECKED = True
+        try:
+            from rtp_llm.models_py.modules.base.xpu.vllm_xpu_ops import rotary_embedding
+            _VLLM_ROPE = rotary_embedding
+        except ImportError:
+            pass
+    return _VLLM_ROPE
+
+
+
+
 def _get_cos_sin_cache(rope_config, head_dim, max_pos, dtype, device):
     rotary_dim = getattr(rope_config, 'dim', 0) or head_dim
     base = getattr(rope_config, 'base', 10000.0) or 10000.0
@@ -143,12 +166,11 @@ def _apply_rope(q, k, positions, rope_config, head_dim, num_heads, num_kv_heads,
     # Round up to next power-of-2 to reduce unique cache entries
     max_pos = 1 << (raw_max - 1).bit_length()
     cos_sin_cache = _get_cos_sin_cache(rope_config, head_dim, max_pos, dtype, device)
-    try:
-        from rtp_llm.models_py.modules.base.xpu.vllm_xpu_ops import rotary_embedding as vllm_rope
-    except ImportError as e:
+    vllm_rope = _get_vllm_rope()
+    if vllm_rope is None:
         # Op genuinely unavailable: fall through to the Python path below.
         if not getattr(_apply_rope, '_rope_fallback_warned', False):
-            logger.warning('vllm RoPE op unavailable, using Python fallback (perf degraded): %s', e)
+            logger.warning('vllm RoPE op unavailable, using Python fallback (perf degraded)')
             _apply_rope._rope_fallback_warned = True
     else:
         # The kernel writes q/k in place.  If it raises mid-write the tensors are
@@ -237,14 +259,14 @@ _PREFILL_WRITE_IDX_CACHE_MAX = 64
 
 def _get_prefill_write_indices(bids_cpu, start_pos, N, tpb, device):
     """Return (block_indices_dev, offsets_dev, n_valid). Cached by
-    (bids.data_ptr(), start_pos, N, tpb, device).
+    (numel, content_hash, start_pos, N, tpb, device).
     """
     # Key on a full content digest (not a weak sum+last fingerprint) so a
     # reallocated tensor at the same address, or two block tables that merely
     # share sum/last, can never alias to a stale cached index set.
     bids_contig = bids_cpu.contiguous()
     content_hash = hash(bids_contig.numpy().tobytes())
-    key = (bids_cpu.data_ptr(), bids_cpu.numel(), content_hash,
+    key = (bids_cpu.numel(), content_hash,
            int(start_pos), int(N), int(tpb), str(device))
     cached = _PREFILL_WRITE_IDX_CACHE.get(key)
     if cached is not None:
@@ -460,34 +482,33 @@ class XpuVllmPrefillImpl(FMHAImplBase):
                 raise RuntimeError(
                     "XPU prefill: kv_cache is present but no block IDs available. "
                     "Cannot write KV to paged cache without block table.")
-            if block_ids_all is not None and block_ids_all.numel() > 0:
-                block_ids_cpu = block_ids_all if block_ids_all.is_cpu else block_ids_all.cpu()
-                if input_lengths_cpu is not None and input_lengths_cpu.numel() > 1:
-                    # Batched prefill: write each request separately
-                    num_reqs = input_lengths_cpu.numel()
-                    offsets = torch.cat([torch.zeros(1, dtype=torch.int32), input_lengths_cpu.cumsum(0)])
-                    # block_ids_all may be [num_reqs, blocks_per_req] or [1, total_blocks]
-                    # Reshape to [num_reqs, -1] if needed
-                    if block_ids_cpu.dim() == 1:
-                        blocks_per_req = block_ids_cpu.numel() // num_reqs
-                        bids_2d = block_ids_cpu.reshape(num_reqs, blocks_per_req)
-                    elif block_ids_cpu.shape[0] == num_reqs:
-                        bids_2d = block_ids_cpu
-                    else:
-                        blocks_per_req = block_ids_cpu.numel() // num_reqs
-                        bids_2d = block_ids_cpu.reshape(num_reqs, blocks_per_req)
-                    for req_idx in range(num_reqs):
-                        start = int(offsets[req_idx])
-                        end = int(offsets[req_idx + 1])
-                        bids = bids_2d[req_idx]
-                        _write_to_paged_cache(
-                            k[start:end], v[start:end], kv_cache, bids, 0,
-                            self.num_kv_heads, self.head_dim,
-                        )
+            block_ids_cpu = block_ids_all if block_ids_all.is_cpu else block_ids_all.cpu()
+            if input_lengths_cpu is not None and input_lengths_cpu.numel() > 1:
+                # Batched prefill: write each request separately
+                num_reqs = input_lengths_cpu.numel()
+                offsets = torch.cat([torch.zeros(1, dtype=torch.int32), input_lengths_cpu.cumsum(0)])
+                # block_ids_all may be [num_reqs, blocks_per_req] or [1, total_blocks]
+                # Reshape to [num_reqs, -1] if needed
+                if block_ids_cpu.dim() == 1:
+                    blocks_per_req = block_ids_cpu.numel() // num_reqs
+                    bids_2d = block_ids_cpu.reshape(num_reqs, blocks_per_req)
+                elif block_ids_cpu.shape[0] == num_reqs:
+                    bids_2d = block_ids_cpu
                 else:
-                    bids = block_ids_cpu[0]
-                    _write_to_paged_cache(k, v, kv_cache, bids, 0,
-                                          self.num_kv_heads, self.head_dim)
+                    blocks_per_req = block_ids_cpu.numel() // num_reqs
+                    bids_2d = block_ids_cpu.reshape(num_reqs, blocks_per_req)
+                for req_idx in range(num_reqs):
+                    start = int(offsets[req_idx])
+                    end = int(offsets[req_idx + 1])
+                    bids = bids_2d[req_idx]
+                    _write_to_paged_cache(
+                        k[start:end], v[start:end], kv_cache, bids, 0,
+                        self.num_kv_heads, self.head_dim,
+                    )
+            else:
+                bids = block_ids_cpu[0]
+                _write_to_paged_cache(k, v, kv_cache, bids, 0,
+                                      self.num_kv_heads, self.head_dim)
 
             # PD disaggregation: notify cache_store the KV blocks for this request
             # are ready so the decode side can fetch them via P2P RPC.
