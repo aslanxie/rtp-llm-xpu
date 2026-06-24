@@ -1194,7 +1194,7 @@ def get_visible_device_list():
     # XPU affinity mask (and vice versa).
     if _is_xpu_device():
         xpu_mask = os.environ.get("ZE_AFFINITY_MASK", None)
-        if xpu_mask is not None:
+        if xpu_mask is not None and xpu_mask.strip():
             # ZE_AFFINITY_MASK may use dotted format "0.0,1.0" for sub-devices;
             # extract only the device portion (before the dot) for indexing.
             return [e.split(".")[0] for e in xpu_mask.split(",")]

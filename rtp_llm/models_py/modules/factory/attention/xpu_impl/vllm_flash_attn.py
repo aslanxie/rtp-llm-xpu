@@ -693,7 +693,8 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         # reused across two different batch shapes that merely share the same
         # seq_lens fingerprint.
         _last_layer = getattr(cls, "_last_layer_idx", None)
-        if _last_layer is None or layer_idx <= _last_layer:
+        _is_step_start = (_last_layer is None or layer_idx <= _last_layer)
+        if _is_step_start:
             cls._step_id = getattr(cls, "_step_id", 0) + 1
         cls._last_layer_idx = layer_idx
         _sid = cls._step_id
@@ -707,7 +708,9 @@ class XpuVllmDecodeImpl(FMHAImplBase):
             _stream_key = torch.xpu.current_stream(qkv.device)
         except Exception:
             _stream_key = None
-        _seq_fp = hash(seq_lens_cpu.contiguous().numpy().tobytes())
+        if _is_step_start:
+            cls._step_seq_fp = hash(seq_lens_cpu.contiguous().numpy().tobytes())
+        _seq_fp = cls._step_seq_fp
         # Set position_ids for RoPE — CPU→device transfer (async, no sync).
         # Hoist across layers: identical for all 36 layers in a decode step.
         if self.need_rope:
@@ -760,7 +763,9 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         # hybrid model (GLA/sliding-window) whose layers map to different cache
         # groups would produce a DIFFERENT table per group -> different hash ->
         # a correct miss instead of silently reusing another group's block ids.
-        _table_hash = hash(needed_bids.contiguous().numpy().tobytes())
+        if _is_step_start:
+            cls._step_table_hash = hash(needed_bids.contiguous().numpy().tobytes())
+        _table_hash = cls._step_table_hash
 
         # Hoist write-indices CPU→GPU across layers (identical for all 36 layers)
         _wk = (_sid, _stream_key, _table_hash, _seq_fp, cache.device)
@@ -871,7 +876,7 @@ class XpuVllmDecodeImpl(FMHAImplBase):
             _stream_key,
             _table_hash,
             kv_lens.numel(),
-            hash(kv_lens.contiguous().numpy().tobytes()),
+            _seq_fp,
             qkv.device,
         )
         _sk_cache = getattr(cls, "_seqused_k_cache", None)
