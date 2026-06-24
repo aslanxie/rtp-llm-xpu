@@ -493,12 +493,20 @@ class XpuVllmPrefillImpl(FMHAImplBase):
                 # block_ids_all may be [num_reqs, blocks_per_req] or [1, total_blocks]
                 # Reshape to [num_reqs, -1] if needed
                 if block_ids_cpu.dim() == 1:
-                    blocks_per_req = block_ids_cpu.numel() // num_reqs
+                    blocks_per_req, _rem = divmod(block_ids_cpu.numel(), num_reqs)
+                    if _rem != 0:
+                        raise RuntimeError(
+                            f"XPU batched prefill: block_ids ({block_ids_cpu.numel()}) not evenly "
+                            f"divisible by num_reqs ({num_reqs}). Cannot reshape block table.")
                     bids_2d = block_ids_cpu.reshape(num_reqs, blocks_per_req)
                 elif block_ids_cpu.shape[0] == num_reqs:
                     bids_2d = block_ids_cpu
                 else:
-                    blocks_per_req = block_ids_cpu.numel() // num_reqs
+                    blocks_per_req, _rem = divmod(block_ids_cpu.numel(), num_reqs)
+                    if _rem != 0:
+                        raise RuntimeError(
+                            f"XPU batched prefill: block_ids ({block_ids_cpu.numel()}) not evenly "
+                            f"divisible by num_reqs ({num_reqs}). Cannot reshape block table.")
                     bids_2d = block_ids_cpu.reshape(num_reqs, blocks_per_req)
                 for req_idx in range(num_reqs):
                     start = int(offsets[req_idx])

@@ -22,6 +22,17 @@
 
 namespace rtp_llm {
 
+namespace {
+inline torch::Tensor maybePinMemory(torch::Tensor t) {
+#if !USING_XPU
+    return t.pin_memory();
+#else
+    return t;
+#endif
+}
+}  // namespace
+
+
 bool MtpExecutor::isTpRank0() const {
     return tp_rank_ == 0;
 }
@@ -836,7 +847,7 @@ void MtpExecutor::draftModelDecode(GptModelInputs&             model_input,
 
     // update TP > 0 batch_size
     size_t batch_size   = model_input.combo_tokens.size(0);
-    spec_prefix_lengths = model_input.sequence_lengths.cpu().clone().pin_memory();
+    spec_prefix_lengths = maybePinMemory(model_input.sequence_lengths.cpu().clone());
 
     auto pre_propose_token_t_raw = model_input.combo_tokens.to(getTorchDevice()).clone();
 

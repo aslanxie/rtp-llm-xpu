@@ -17,6 +17,17 @@
 
 namespace rtp_llm {
 
+namespace {
+inline torch::Tensor maybePinMemory(torch::Tensor t) {
+#if !USING_XPU
+    return t.pin_memory();
+#else
+    return t;
+#endif
+}
+}  // namespace
+
+
 KVCacheManager::KVCacheManager(const CacheConfig&                 config,
                                bool                               warmup,
                                const kmonitor::MetricsReporterPtr metrics_reporter,
@@ -492,7 +503,7 @@ void KVCacheManager::allocateAndSync() {
     size_t world_size = parallelism_config_.tp_size * parallelism_config_.dp_size;
     if (world_size > 1) {
         size_t local_rank    = parallelism_config_.tp_size * parallelism_config_.dp_rank + parallelism_config_.tp_rank;
-        auto   block_num_t   = torch::empty({(int64_t)world_size}, torch::kInt32).pin_memory();
+        auto   block_num_t   = maybePinMemory(torch::empty({(int64_t)world_size}, torch::kInt32));
         auto   block_num_ptr = block_num_t.data_ptr<int>();
         block_num_ptr[local_rank] = config_.block_num;
         execAllGather({{block_num_t}, ParallelMode::DP_AND_TP});

@@ -8,6 +8,17 @@
 
 namespace rtp_llm {
 
+namespace {
+inline torch::Tensor maybePinMemory(torch::Tensor t) {
+#if !USING_XPU
+    return t.pin_memory();
+#else
+    return t;
+#endif
+}
+}  // namespace
+
+
 absl::Status MtpBatchStreamProcessor::dispatchPrefill(const StreamGroups& stream_groups,
                                                       const MergedOutput& prefill_output,
                                                       const MergedOutput& propose_output) const {
@@ -150,8 +161,8 @@ void MtpBatchStreamProcessor::prepareDecodeDraftModelInput(const StreamGroups& s
     size_t batch_size = stream_groups.size();
     int    batch_idx  = 0;
 
-    auto combo_tokens      = torch::empty({(int64_t)batch_size}, torch::kInt32).pin_memory();
-    auto lm_output_indexes = torch::empty({(int64_t)batch_size}, torch::kInt32).pin_memory();
+    auto combo_tokens      = maybePinMemory(torch::empty({(int64_t)batch_size}, torch::kInt32));
+    auto lm_output_indexes = maybePinMemory(torch::empty({(int64_t)batch_size}, torch::kInt32));
 
     for (const auto& stream : stream_groups.allStreams()) {
         int propose_token                            = stream->getSPOutputBuffer()->tokens.data_ptr<int>()[1];
@@ -169,11 +180,11 @@ void MtpBatchStreamProcessor::prepareOneStepSpecDecodeModelInput(const StreamGro
     size_t batch_size = stream_groups.size();
 
     // prepare target model input buffer
-    auto target_prefix_lengths = model_input.sequence_lengths.cpu().clone().pin_memory();
+    auto target_prefix_lengths = maybePinMemory(model_input.sequence_lengths.cpu().clone());
 
     // allocate target_combo_tokens shape [batch_size, propose_step_ + 1]
     auto target_combo_tokens =
-        torch::empty({(int64_t)(stream_groups.size() * (propose_step_ + 1))}, torch::kInt32).pin_memory();
+        maybePinMemory(torch::empty({(int64_t)(stream_groups.size() * (propose_step_ + 1))}, torch::kInt32));
 
     // copy propose tokens to target_combo_tokens
     int batch_idx = 0;
@@ -193,7 +204,7 @@ void MtpBatchStreamProcessor::prepareOneStepSpecDecodeModelInput(const StreamGro
     // update model_input
     model_input.combo_tokens       = std::move(target_combo_tokens);
     model_input.prefix_lengths     = target_prefix_lengths;
-    model_input.sequence_lengths   = torch::empty({0}, torch::kInt32).pin_memory();
+    model_input.sequence_lengths   = maybePinMemory(torch::empty({0}, torch::kInt32));
     model_input.last_hidden_states = torch::Tensor();
 
     for (int i = 0; i < model_input.input_lengths.size(0); i++) {
@@ -201,7 +212,7 @@ void MtpBatchStreamProcessor::prepareOneStepSpecDecodeModelInput(const StreamGro
     }
 
     // set lm_output_indexes
-    auto lm_output_indexes = torch::empty({(int64_t)(batch_size * (propose_step_ + 1))}, torch::kInt32).pin_memory();
+    auto lm_output_indexes = maybePinMemory(torch::empty({(int64_t)(batch_size * (propose_step_ + 1))}, torch::kInt32));
     for (int i = 0; i < batch_size * (propose_step_ + 1); i++) {
         lm_output_indexes.data_ptr<int>()[i] = i;
     }
@@ -217,7 +228,7 @@ void MtpBatchStreamProcessor::updateDecodeDraftModelInput(GptModelInputs&       
     // here combo_tokens is a device buffer
     model_input.combo_tokens = draft_token_ids.reshape({batch_size});
 
-    model_input.sequence_lengths = model_input.sequence_lengths.cpu().clone().pin_memory();
+    model_input.sequence_lengths = maybePinMemory(model_input.sequence_lengths.cpu().clone());
     for (int i = 0; i < batch_size; i++) {
         model_input.sequence_lengths.data_ptr<int>()[i]++;
     }
@@ -263,10 +274,10 @@ void MtpBatchStreamProcessor::updateDecodePostDraftModelInput(
     auto& accept_lens = speculative_sampler_output.accept_len;
     total_accept_len  = std::accumulate(accept_lens.begin(), accept_lens.end(), 0);
 
-    model_input.combo_tokens = torch::empty({(int64_t)total_accept_len}, torch::kInt32).pin_memory();
+    model_input.combo_tokens = maybePinMemory(torch::empty({(int64_t)total_accept_len}, torch::kInt32));
 
     int  token_offset      = 0;
-    auto lm_output_indexes = torch::empty({(int64_t)batch_size}, torch::kInt32).pin_memory();
+    auto lm_output_indexes = maybePinMemory(torch::empty({(int64_t)batch_size}, torch::kInt32));
 
     std::vector<torch::Tensor> hidden_states_list;
     for (int i = 0; i < batch_size; i++) {
