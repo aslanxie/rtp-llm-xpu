@@ -558,8 +558,12 @@ class ModelLoader:
     @staticmethod
     def force_clean_cuda_memory():
         """安全清理显存，避免残留引用"""
+        from rtp_llm.device.device_impl import _is_cuda_device, _is_xpu_device
         gc.collect()
-        if torch.cuda.is_available():
+        if _is_xpu_device():
+            torch.xpu.synchronize()
+            torch.xpu.empty_cache()
+        elif _is_cuda_device():
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
 

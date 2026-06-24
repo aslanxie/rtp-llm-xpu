@@ -14,6 +14,7 @@ from rtp_llm.config.py_config_modules import PyEnvConfigs
 from rtp_llm.distribute.distributed_server import DistributedServer, get_world_info
 from rtp_llm.metrics import kmonitor
 from rtp_llm.model_factory import ModelFactory
+from rtp_llm.device.device_type import is_xpu
 from rtp_llm.models_py.distributed.collective_torch import init_distributed_environment
 from rtp_llm.utils.concurrency_controller import get_global_controller
 from rtp_llm.utils.fuser import _nfs_manager
@@ -55,7 +56,7 @@ class BackendManager(object):
                 engine_config.parallelism_config,
                 nccl_comm_config=self._distributed_server.get_nccl_comm_config(),
                 nccl_init_port=self._distributed_server.get_nccl_init_port(),
-                backend="nccl",
+                backend="nccl" if not is_xpu() else "xccl",
                 timeout=self.py_env_configs.distribute_config.dist_comm_timeout,
             )
         world_info = get_world_info(
