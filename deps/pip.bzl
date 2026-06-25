@@ -91,24 +91,30 @@ def pip_deps():
 
 def _xpu_pip_gate_impl(repository_ctx):
     # When building for XPU (--config=xpu sets TF_NEED_XPU=1) re-export the real
-    # install_deps from @pip_xpu_torch so the XPU wheels are declared/fetched.
-    # Otherwise expose a no-op so non-XPU builds and `bazel sync` never declare
-    # the pip_xpu_torch_* whl_library repos (which would resolve XPU-only pins
-    # under an incompatible interpreter, e.g. Python 3.10).
+    # install_deps and requirement from @pip_xpu_torch so the XPU wheels are
+    # declared/fetched.  Otherwise expose no-ops so non-XPU builds and
+    # `bazel sync` never trigger the pip_xpu_torch repo rule (which contacts
+    # download.pytorch.org and would fail on internal networks).
     enabled = repository_ctx.os.environ.get("TF_NEED_XPU", "0") == "1"
-    repository_ctx.file("BUILD.bazel", "")
+    repository_ctx.file("BUILD.bazel", """
+py_library(name = "dummy_pkg", visibility = ["//visibility:public"])
+""")
     if enabled:
         repository_ctx.file(
             "requirements.bzl",
-            "load(\"@pip_xpu_torch//:requirements.bzl\", _install_deps = \"install_deps\")\n" +
+            "load(\"@pip_xpu_torch//:requirements.bzl\", _install_deps = \"install_deps\", _requirement = \"requirement\")\n" +
             "def install_deps(**kwargs):\n" +
-            "    _install_deps(**kwargs)\n",
+            "    _install_deps(**kwargs)\n" +
+            "def requirement(name):\n" +
+            "    return _requirement(name)\n",
         )
     else:
         repository_ctx.file(
             "requirements.bzl",
             "def install_deps(**kwargs):\n" +
-            "    pass\n",
+            "    pass\n" +
+            "def requirement(name):\n" +
+            "    return \"@xpu_pip_gate//:dummy_pkg\"\n",
         )
 
 _xpu_pip_gate = repository_rule(

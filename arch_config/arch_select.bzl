@@ -4,7 +4,7 @@ load("@pip_arm_torch//:requirements.bzl", requirement_arm="requirement")
 load("@pip_gpu_cuda12_torch//:requirements.bzl", requirement_gpu_cuda12="requirement")
 load("@pip_gpu_cuda12_9_torch//:requirements.bzl", requirement_gpu_cuda12_9="requirement")
 load("@pip_gpu_rocm_torch//:requirements.bzl", requirement_gpu_rocm="requirement")
-load("@pip_xpu_torch//:requirements.bzl", requirement_xpu="requirement")
+load("@xpu_pip_gate//:requirements.bzl", requirement_xpu="requirement")
 load("@rtp_llm//bazel:defs.bzl", "copy_so")
 
 # Packages not available in XPU pip environment (CUDA/ROCm-only).
