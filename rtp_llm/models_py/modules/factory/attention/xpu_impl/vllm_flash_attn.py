@@ -643,10 +643,12 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         """
         flash_attn_varlen = _get_flash_attn_varlen()
         seq_lengths = self.attn_inputs.sequence_lengths
+        if seq_lengths is None:
+            raise RuntimeError("XPU paged decode requires sequence_lengths")
 
         # Guard against speculative/multi-token decode (q_len > 1 per request).
         # This path assumes max_seqlen_q=1 (normal autoregressive decode).
-        _num_req = seq_lengths.numel() if seq_lengths is not None else qkv.shape[0]
+        _num_req = seq_lengths.numel()
         if qkv.shape[0] != _num_req:
             raise NotImplementedError(
                 f"XPU paged decode does not support multi-token query "
@@ -664,18 +666,10 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         if block_ids_device is None:
             block_ids_device = self.attn_inputs.kv_cache_block_id_device
 
-        try:
-            num_requests = seq_lengths.numel() if seq_lengths is not None else 0
-        except (RuntimeError, AttributeError):
-            num_requests = 0
-        if num_requests == 0:
-            num_requests = 1
+        num_requests = seq_lengths.numel()
 
         # --- Keep seq_lengths on CPU; avoid GPU→CPU sync ---
-        if seq_lengths is not None:
-            seq_lens_cpu = seq_lengths if seq_lengths.is_cpu else seq_lengths.cpu()
-        else:
-            seq_lens_cpu = torch.zeros(num_requests, dtype=torch.long)
+        seq_lens_cpu = seq_lengths if seq_lengths.is_cpu else seq_lengths.cpu()
 
         # Compute max position on CPU (no GPU sync) for RoPE cache sizing
         max_pos_hint = int(seq_lens_cpu.max()) if seq_lens_cpu.numel() > 0 else 0
