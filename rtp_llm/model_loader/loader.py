@@ -22,7 +22,7 @@ from rtp_llm.model_loader.tensor_source import DatabaseTensorSource, TensorColle
 from rtp_llm.model_loader.weight_module import CustomAtomicWeight, WeightModule
 from rtp_llm.ops import TaskType, VitSeparation
 from rtp_llm.utils.database import BaseDatabase, CkptDatabase
-from rtp_llm.device.device_impl import gpu_is_available, _is_xpu_device
+from rtp_llm.device.device_impl import gpu_is_available
 from rtp_llm.utils.model_weight import W, WeightStyle, identity
 from rtp_llm.utils.module_util import has_module
 from rtp_llm.utils.time_util import timer_wrapper
@@ -419,6 +419,7 @@ class ModelLoader:
             if inline_fp8 and _total_count % 500 == 0:
                 ModelLoader.force_clean_cuda_memory()
             if _total_count % 5000 == 0 and gpu_is_available():
+                from rtp_llm.device.device_impl import _is_xpu_device
                 if _is_xpu_device():
                     alloc_gb = torch.xpu.memory_allocated() / (1024**3)
                     reserved_gb = torch.xpu.memory_reserved() / (1024**3)
