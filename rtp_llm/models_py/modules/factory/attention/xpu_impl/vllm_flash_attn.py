@@ -474,11 +474,11 @@ class XpuVllmPrefillImpl(FMHAImplBase):
         # Write K,V to paged LayerKVCache for future decode steps
         if kv_cache is not None:
             # Prefer host block IDs to avoid device->host sync in the write path.
-            block_ids_all = self.attn_inputs.kv_cache_kernel_block_id_host
+            block_ids_all = self.attn_inputs.kv_cache_kernel_block_id
             if block_ids_all is None:
                 block_ids_all = self.attn_inputs.kv_cache_kernel_block_id_device
             if block_ids_all is None:
-                block_ids_all = self.attn_inputs.kv_cache_block_id_host
+                block_ids_all = self.attn_inputs.kv_cache_block_id
             if block_ids_all is None:
                 block_ids_all = self.attn_inputs.kv_cache_block_id_device
             if block_ids_all is None or block_ids_all.numel() == 0:
@@ -532,7 +532,7 @@ class XpuVllmPrefillImpl(FMHAImplBase):
                     layer_idx,
                     _shape(ai.input_lengths),
                     _shape(ai.prefix_lengths),
-                    _shape(ai.kv_cache_block_id_host),
+                    _shape(ai.kv_cache_block_id),
                 )
             common.apply_write_cache_store(
                 self.write_cache_store_impl, self.attn_inputs, kv_cache
@@ -657,9 +657,9 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         # --- Use CPU-side block IDs to avoid device→host sync ---
         # Prefer kernel-granularity block IDs for attention compute;
         # fall back to physical block IDs (identical when kernel_blocks_per_kv_block == 1).
-        block_ids_host = self.attn_inputs.kv_cache_kernel_block_id_host
+        block_ids_host = self.attn_inputs.kv_cache_kernel_block_id
         if block_ids_host is None:
-            block_ids_host = self.attn_inputs.kv_cache_block_id_host
+            block_ids_host = self.attn_inputs.kv_cache_block_id
         block_ids_device = self.attn_inputs.kv_cache_kernel_block_id_device
         if block_ids_device is None:
             block_ids_device = self.attn_inputs.kv_cache_block_id_device
