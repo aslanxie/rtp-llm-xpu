@@ -70,6 +70,14 @@ inline torch::Device getTorchDevice() {
 }
 inline torch::Device getTorchCudaDevice() { return getTorchDevice(); }
 
+inline torch::Tensor maybePinMemory(torch::Tensor t) {
+#if !USING_XPU
+    return t.pin_memory();
+#else
+    return t;
+#endif
+}
+
 void          setTraceMemory(bool trace_memory);
 
 // ===================================================================

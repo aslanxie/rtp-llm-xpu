@@ -8,16 +8,6 @@
 
 namespace rtp_llm {
 
-namespace {
-inline torch::Tensor maybePinMemory(torch::Tensor t) {
-#if !USING_XPU
-    return t.pin_memory();
-#else
-    return t;
-#endif
-}
-}  // namespace
-
 
 absl::Status MtpBatchStreamProcessor::dispatchPrefill(const StreamGroups& stream_groups,
                                                       const MergedOutput& prefill_output,

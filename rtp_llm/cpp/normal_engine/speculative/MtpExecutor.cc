@@ -22,16 +22,6 @@
 
 namespace rtp_llm {
 
-namespace {
-inline torch::Tensor maybePinMemory(torch::Tensor t) {
-#if !USING_XPU
-    return t.pin_memory();
-#else
-    return t;
-#endif
-}
-}  // namespace
-
 
 bool MtpExecutor::isTpRank0() const {
     return tp_rank_ == 0;

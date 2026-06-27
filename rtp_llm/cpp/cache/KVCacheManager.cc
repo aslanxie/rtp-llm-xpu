@@ -17,16 +17,6 @@
 
 namespace rtp_llm {
 
-namespace {
-inline torch::Tensor maybePinMemory(torch::Tensor t) {
-#if !USING_XPU
-    return t.pin_memory();
-#else
-    return t;
-#endif
-}
-}  // namespace
-
 
 KVCacheManager::KVCacheManager(const CacheConfig&                 config,
                                bool                               warmup,

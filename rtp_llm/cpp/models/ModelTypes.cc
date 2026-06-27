@@ -4,16 +4,6 @@
 
 namespace rtp_llm {
 
-namespace {
-inline torch::Tensor maybePinMemory(torch::Tensor t) {
-#if !USING_XPU
-    return t.pin_memory();
-#else
-    return t;
-#endif
-}
-}  // namespace
-
 
 void tpSyncModelInputs(GptModelInputs& inputs, const ParallelismConfig& parallelism_config) {
     if (parallelism_config.tp_size <= 1) {
