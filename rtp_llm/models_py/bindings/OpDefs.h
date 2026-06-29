@@ -203,9 +203,10 @@ struct PyAttentionInputs {
     int           total_tokens            = 0;
     torch::Tensor padding_offset;
     torch::Tensor combo_position_ids;
+#if USING_XPU
     // XPU: per-token RoPE position ids, cached across layers within one forward pass.
     torch::Tensor position_ids;
-
+#endif
     // for write cache store
     std::optional<PyCacheStoreInputs> cache_store_inputs;
 
