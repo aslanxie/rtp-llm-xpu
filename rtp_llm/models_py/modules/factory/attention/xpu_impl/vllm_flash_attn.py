@@ -432,22 +432,33 @@ class XpuVllmPrefillImpl(FMHAImplBase):
         # XPU attention only supports BASE (unquantized) KV cache.
         kv_dt = getattr(attn_configs, 'kv_cache_dtype', None)
         if kv_dt is not None and kv_dt != KvCacheDataType.BASE:
-            return False
-        # Prefix-cache (chunked prefill / reuse) is not yet implemented here:
+            raise NotImplementedError(
+                f"XPU prefill attention does not support quantized KV cache "
+                f"(got {kv_dt}). Use a non-quantized KV cache.")
+        # Prefix-cache (chunked prefill / reuse) is not yet implemented:
         # the path does not load previously written K/V blocks into attention,
         # so any request with prefix_lengths > 0 would produce wrong results.
-        # Decline the impl when prefix tokens are present so the framework can
-        # route the request to a backend that supports it.
         pl = getattr(attn_inputs, 'prefix_lengths', None)
         if pl is not None and pl.numel() > 0:
             try:
                 if int(pl.sum()) > 0:
-                    return False
+                    raise NotImplementedError(
+                        "XPU prefill attention does not support prefix cache "
+                        "(chunked prefill / KV reuse). Disable prefix cache "
+                        "for XPU.")
+            except NotImplementedError:
+                raise
             except Exception:
-                return False
+                raise NotImplementedError(
+                    "XPU prefill attention does not support prefix cache "
+                    "(chunked prefill / KV reuse). Disable prefix cache "
+                    "for XPU.")
         rope_style = getattr(getattr(attn_configs, "rope_config", None), "style", RopeStyle.No)
         if rope_style in _UNSUPPORTED_ROPE_STYLES:
-            return False
+            raise NotImplementedError(
+                f"XPU prefill attention does not support RoPE style "
+                f"{rope_style}. Supported styles exclude: "
+                f"{_UNSUPPORTED_ROPE_STYLES}.")
         return True
 
     def forward(self, qkv, kv_cache=None, layer_idx=0):
@@ -601,15 +612,21 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         # XPU attention only supports BASE (unquantized) KV cache.
         kv_dt = getattr(attn_configs, 'kv_cache_dtype', None)
         if kv_dt is not None and kv_dt != KvCacheDataType.BASE:
-            return False
+            raise NotImplementedError(
+                f"XPU decode attention does not support quantized KV cache "
+                f"(got {kv_dt}). Use a non-quantized KV cache.")
         # Requires FA2 (flash_attn_varlen).  When FA2 is not installed
-        # no XPU decode impl supports this config (the factory fails fast),
-        # matching the CUDA/ROCm "no kernel -> not supported" contract.
+        # no XPU decode impl supports this config.
         if not _is_fa2_available():
-            return False
+            raise NotImplementedError(
+                "XPU decode attention requires flash_attn (FA2) but it is "
+                "not installed. Install vllm-xpu-kernels with FA2 support.")
         rope_style = getattr(getattr(attn_configs, "rope_config", None), "style", RopeStyle.No)
         if rope_style in _UNSUPPORTED_ROPE_STYLES:
-            return False
+            raise NotImplementedError(
+                f"XPU decode attention does not support RoPE style "
+                f"{rope_style}. Supported styles exclude: "
+                f"{_UNSUPPORTED_ROPE_STYLES}.")
         return True
 
     def forward(self, qkv, kv_cache=None, layer_idx=0):
