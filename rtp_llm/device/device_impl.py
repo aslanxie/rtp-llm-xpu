@@ -1072,7 +1072,15 @@ class XpuImpl(GpuImpl):
         quant_mode: torch.dtype,
         arch: str = "",
     ) -> torch.Tensor:
-        # XPU: no custom mixed GEMM preprocessing; return as-is.
+        # XPU does not support weight-only quantization (INT8/INT4) that
+        # requires CUDA-specific preprocessing. Fail fast rather than silently
+        # returning unprocessed weights which would cause wrong inference results.
+        _UNSUPPORTED_QUANT = (torch.int8, torch.quint4x2)
+        if quant_mode in _UNSUPPORTED_QUANT:
+            raise NotImplementedError(
+                f"Weight quantization format {quant_mode} is not supported on XPU. "
+                "Please use a non-quantized (FP16/BF16) or FP8 model."
+            )
         return tensor
 
 
