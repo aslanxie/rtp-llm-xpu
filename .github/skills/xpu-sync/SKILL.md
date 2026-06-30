@@ -77,3 +77,6 @@ If `git merge upstream/main` reports conflicts:
 ## Output
 - Report: merge status (clean/resolved), commit hash, number of conflicts resolved (if any)
 - Do NOT push to origin
+
+## See Also
+- **code-modify** — apply this discipline when resolving merge conflicts: compare with CUDA/ROCm peers, keep changes device-scoped, one fix per commit, add TODO(xpu) for any gap left unresolved

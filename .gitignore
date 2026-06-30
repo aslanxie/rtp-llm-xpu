@@ -69,6 +69,7 @@ git.diff
 
 *.mo
 *build*/
+!.github/skills/xpu-build/
 .doctrees/
 node_modules/
 docs/index/dist/
