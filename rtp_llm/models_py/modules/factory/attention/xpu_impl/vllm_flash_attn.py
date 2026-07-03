@@ -769,11 +769,18 @@ class XpuVllmDecodeImpl(FMHAImplBase):
         needed_bids = bids_2d_cpu[:, :max_blocks_needed]
 
         # Block-table content fingerprint. Within one decode step all layers of
-        # a homogeneous model share the same table -> identical hash -> the
-        # per-step device caches below still hit across all layers. A future
-        # hybrid model (GLA/sliding-window) whose layers map to different cache
-        # groups would produce a DIFFERENT table per group -> different hash ->
-        # a correct miss instead of silently reusing another group's block ids.
+        # a homogeneous model share the same table, so hashing once at step
+        # start and reusing it lets the per-step device caches below hit across
+        # all layers.
+        #
+        # TODO(xpu): make this hash per-layer/per-group before enabling hybrid
+        # models. The hash is computed ONLY at _is_step_start (layer wrap-around)
+        # and reused for every later layer. A hybrid model (GLA/sliding-window)
+        # whose layers map to different cache groups has per-group block tables,
+        # but later layers would still key off layer-0's STALE hash -> the
+        # write_idx_cache / flat_bids_cache would falsely HIT and use the wrong
+        # block indices. Safe today only because XPU has no hybrid-model support
+        # (single block table for all layers, see the bids_2d_cpu TODO above).
         if _is_step_start:
             cls._step_table_hash = hash(needed_bids.contiguous().numpy().tobytes())
         _table_hash = cls._step_table_hash

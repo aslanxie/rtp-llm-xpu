@@ -132,14 +132,21 @@ SamplerOutput Sampler::forward(const SamplerInputs& inputs) {
                  generator});
             if (greedy_output.success.defined()) {
                 success.copy_(greedy_output.success);
+                // TODO(zhangjianning.zjn): would be better to eliminate the copy
+                if (variable_num_beams) {
+                    token_ids_out.copy_(token_ids_in);
+                }
             } else {
                 success.fill_(true);
-            }
-            // Always copy token IDs for variable-beam batches, regardless of
-            // whether success was defined (e.g. XPU returns undefined success
-            // but still produces valid token_ids via params.token_ids).
-            if (variable_num_beams) {
-                token_ids_out.copy_(token_ids_in);
+#if USING_XPU
+                // XPU's greedy sampler returns an undefined `success` tensor but
+                // still writes valid ids into token_ids_in (params.token_ids).
+                // Mirror the success-defined branch so variable-beam batches are
+                // populated. Guarded so CUDA/ROCm behavior stays byte-identical.
+                if (variable_num_beams) {
+                    token_ids_out.copy_(token_ids_in);
+                }
+#endif
             }
         } else {
             RTP_LLM_LOG_DEBUG("current_num_beams_in is %d", cur_num_beams_in);

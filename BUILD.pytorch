@@ -51,7 +51,7 @@ cc_library(
             # "torch/lib/libhip*.so*",
             # "torch/lib/lib*amd*.so*",
         ]),
-        ":using_xpu": [
+        "@//:using_xpu": [
             "torch/lib/libtorch_xpu.so",
             "torch/lib/libc10_xpu.so",
         ],
