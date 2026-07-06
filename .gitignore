@@ -69,9 +69,11 @@ git.diff
 
 *.mo
 *build*/
+!.github/skills/xpu-build/
 .doctrees/
 node_modules/
 docs/index/dist/
+rtp_llm/libs/*.so
 
 # Local analysis reports
 *_analysis_report.md

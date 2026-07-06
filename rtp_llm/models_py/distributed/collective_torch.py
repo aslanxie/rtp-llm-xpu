@@ -34,6 +34,7 @@ class Group(Enum):
 # Global process group storage
 # Key can be Group enum or string (for multiple DP/TP groups)
 _group_map: Dict[Union[Group, str], torch.distributed.ProcessGroup] = {}
+_gloo_group_map: Dict[Union[Group, str], torch.distributed.ProcessGroup] = {}
 _parallelism_config: Optional[ParallelismConfig] = None
 _initialized: bool = False  # Track if we've initialized (to prevent double init)
 
@@ -70,12 +71,12 @@ def init_distributed_environment(
         # Still need to create groups if they don't exist
         if not _group_map:
             _create_process_groups(parallelism_config, backend, timedelta(days=36500))
-            _register_process_groups_to_cpp()
+            _register_process_groups_to_cpp(parallelism_config.local_rank)
         if rocm_rccl.is_available_runtime() and parallelism_config.tp_size > 1:
             rocm_rccl.prepare_comm_if_needed(parallelism_config, _get_group(Group.TP))
         return
 
-    assert backend in ["nccl"], "backend current only supports nccl"
+    assert backend in ["nccl", "xccl"], "backend current only supports nccl and xccl"
     ip = nccl_comm_config.nccl_ip
     port = nccl_init_port
     world_rank = parallelism_config.world_rank
@@ -92,7 +93,7 @@ def init_distributed_environment(
         _create_process_groups(parallelism_config, backend, timedelta(days=36500))
         _parallelism_config = parallelism_config
         _initialized = True
-        _register_process_groups_to_cpp()
+        _register_process_groups_to_cpp(parallelism_config.local_rank)
         if rocm_rccl.is_available_runtime() and parallelism_config.tp_size > 1:
             rocm_rccl.prepare_comm_if_needed(parallelism_config, _get_group(Group.TP))
         return
@@ -106,6 +107,19 @@ def init_distributed_environment(
     # until rank 0 has real work, instead of crashing with a timeout.
     # Note: timedelta.max overflows in PyTorch's C++ TCP store, so use 100 years instead.
     infinite_timeout = timedelta(days=36500)
+
+    # For XCCL (Intel XPU), set device and env vars before init_process_group
+    # so that oneCCL can discover local topology. (Mirrors vLLM XPU worker.)
+    if backend == "xccl":
+        torch.xpu.set_device(local_rank)
+        torch.xpu.empty_cache()
+        # Force OFI transport (not MPI) — matches vLLM; prevents hang on
+        # systems without MPI launcher variables.
+        os.environ.setdefault("CCL_ATL_TRANSPORT", "ofi")
+        os.environ["LOCAL_RANK"] = str(local_rank)
+        os.environ["LOCAL_WORLD_SIZE"] = str(
+            min(torch.xpu.device_count(), world_size)
+        )
 
     # DP_AND_TP (global group) - initialized via init_process_group
     torch.distributed.init_process_group(
@@ -126,10 +140,63 @@ def init_distributed_environment(
     _create_process_groups(parallelism_config, backend, timedelta(days=36500))
     _parallelism_config = parallelism_config
     _initialized = True
-    _register_process_groups_to_cpp()
+    # Create gloo mirror groups for CPU tensor broadcasts (before registering to C++).
+    # vLLM uses a separate CPU group (gloo) for CPU tensors and only
+    # puts GPU tensors through XCCL.  Avoids GPU sync issues.
+    if backend == "xccl":
+        logging.info(f"[rank: {world_rank}] Creating gloo mirror groups ...")
+        _gloo_world = torch.distributed.new_group(backend="gloo", timeout=timedelta(days=36500))
+        _gloo_group_map[Group.DP_AND_TP] = _gloo_world
+        # All ranks must call new_group in the same global order for every
+        # sub-group (DP and TP), even if a rank does not belong to a group.
+        # Iterate DP groups then TP groups deterministically so that every
+        # rank issues the same sequence of collective new_group calls.
+        tp_size = parallelism_config.tp_size
+        dp_size = parallelism_config.dp_size
+        # DP gloo mirrors (one per tp_rank value)
+        if dp_size > 1 and world_size != dp_size:
+            for tp_rank_val in range(tp_size):
+                dp_ranks = [r for r in range(world_size) if r % tp_size == tp_rank_val]
+                _gloo_pg = torch.distributed.new_group(ranks=dp_ranks, backend="gloo", timeout=timedelta(days=36500))
+                _gk = Group.DP.name + str(tp_rank_val)
+                if _gk in _group_map:
+                    _gloo_group_map[_gk] = _gloo_pg
+        # TP gloo mirrors (one per dp_rank value)
+        if tp_size > 1 and world_size != tp_size:
+            for dp_rank_val in range(dp_size):
+                tp_ranks = [r for r in range(world_size) if r // tp_size == dp_rank_val]
+                _gloo_pg = torch.distributed.new_group(ranks=tp_ranks, backend="gloo", timeout=timedelta(days=36500))
+                _gk = Group.TP.name + str(dp_rank_val)
+                if _gk in _group_map:
+                    _gloo_group_map[_gk] = _gloo_pg
+        logging.info(f"[rank: {world_rank}] Gloo mirror groups: {list(_gloo_group_map.keys())}")
+
+    _register_process_groups_to_cpp(local_rank)
     if rocm_rccl.is_available_runtime() and parallelism_config.tp_size > 1:
         rocm_rccl.prepare_comm_if_needed(parallelism_config, _get_group(Group.TP))
     init_user_buffers_environment(parallelism_config)
+
+    # Warmup XCCL communicators eagerly so the first real collective
+    # (which may come from a C++ engine thread) does not trigger
+    # lazy init that hangs.  (Mirrors vLLM XPU worker.)
+    if backend == "xccl":
+        _dev = f"xpu:{local_rank}"
+        logging.info(f"[rank: {world_rank}] Warming up XCCL communicators on {_dev} ...")
+        # Warmup the WORLD group with both all_reduce and broadcast
+        # (the C++ engine calls broadcast first via tpSyncModelInputs)
+        torch.distributed.all_reduce(torch.zeros(1, device=_dev))
+        torch.distributed.broadcast(torch.zeros(1, device=_dev), src=0)
+        # Also warmup every registered process group
+        for _gk, _pg in _group_map.items():
+            if _pg is not torch.distributed.group.WORLD:
+                logging.info(f"[rank: {world_rank}] Warming up XCCL group {_gk} ...")
+                torch.distributed.all_reduce(torch.zeros(1, device=_dev), group=_pg)
+                # src=0 is GLOBAL rank 0 but may not be a member of _pg;
+                # convert group-rank 0 to global rank.
+                _root = torch.distributed.get_global_rank(_pg, 0)
+                torch.distributed.broadcast(torch.zeros(1, device=_dev), src=_root, group=_pg)
+        logging.info(f"[rank: {world_rank}] XCCL warmup done")
+
 
 
 def _create_process_groups(
@@ -208,7 +275,7 @@ def _create_process_groups(
         init_symm_mem_communicator(torch.distributed.group.WORLD)
 
 
-def _register_process_groups_to_cpp():
+def _register_process_groups_to_cpp(local_rank: int = 0):
     """Register Python comm op callbacks for C++ to call back into."""
     try:
         import librtp_compute_ops
@@ -226,6 +293,7 @@ def _register_process_groups_to_cpp():
 
     # Build mode -> process_group mapping (int mode -> ProcessGroup)
     mode_to_group: Dict[int, torch.distributed.ProcessGroup] = {}
+    gloo_mode_to_group: Dict[int, torch.distributed.ProcessGroup] = {}
     registered_modes: set = set()
 
     for group_key, pg in _group_map.items():
@@ -268,6 +336,31 @@ def _register_process_groups_to_cpp():
         if pg_world is not None:
             mode_to_group[_CPP_PARALLEL_MODE_TP] = pg_world
 
+    # Build gloo mirror mode mapping
+    for _gloo_key, _gloo_pg in _gloo_group_map.items():
+        if _gloo_key == Group.DP_AND_TP:
+            gloo_mode_to_group[_CPP_PARALLEL_MODE_DP_AND_TP] = _gloo_pg
+        elif isinstance(_gloo_key, str):
+            if _gloo_key.startswith(Group.TP.name):
+                if _parallelism_config is not None:
+                    dp_rank = torch.distributed.get_rank() // _parallelism_config.tp_size
+                    if _gloo_key == Group.TP.name + str(dp_rank):
+                        gloo_mode_to_group[_CPP_PARALLEL_MODE_TP] = _gloo_pg
+            elif _gloo_key.startswith(Group.DP.name):
+                if _parallelism_config is not None:
+                    tp_rank = torch.distributed.get_rank() % _parallelism_config.tp_size
+                    if _gloo_key == Group.DP.name + str(tp_rank):
+                        gloo_mode_to_group[_CPP_PARALLEL_MODE_DP] = _gloo_pg
+    if (
+        _parallelism_config is not None
+        and _parallelism_config.tp_size > 1
+        and _parallelism_config.world_size == _parallelism_config.tp_size
+        and _CPP_PARALLEL_MODE_TP not in gloo_mode_to_group
+    ):
+        _gloo_world_pg = _gloo_group_map.get(Group.DP_AND_TP)
+        if _gloo_world_pg is not None:
+            gloo_mode_to_group[_CPP_PARALLEL_MODE_TP] = _gloo_world_pg
+
     # NOTE: These callbacks are NOT thin wrappers around the module-level broadcast()/
     # all_reduce()/all_gather() because the C++ calling convention differs significantly:
     #   - C++ uses int mode (ParallelMode enum ordinal) instead of Group enum
@@ -277,30 +370,59 @@ def _register_process_groups_to_cpp():
     # The module-level functions have different signatures and semantics (e.g. all_gather
     # allocates a new tensor), so we implement the C++ contract directly here.
 
-    def _ensure_cuda(t: torch.Tensor, device_id: int):
-        """Move CPU tensor to CUDA if needed (NCCL requires CUDA tensors)."""
-        if t.is_cuda:
+    def _get_device_info():
+        """Get current device type string and device id.
+
+        For XPU we use the stored local_rank (captured from the enclosing
+        scope) instead of torch.xpu.current_device(), because the C++
+        engine thread may reset the default device during model loading.
+        """
+        from rtp_llm.device.device_type import is_xpu
+        if is_xpu():
+            return "xpu", local_rank
+        return "cuda", torch.cuda.current_device()
+
+    def _is_on_device(t: torch.Tensor):
+        """Check if tensor is already on the accelerator device."""
+        return t.is_cuda or (hasattr(t, 'is_xpu') and t.is_xpu)
+
+    def _ensure_device(t: torch.Tensor, device_type: str, device_id: int):
+        """Move CPU tensor to accelerator device if needed."""
+        if _is_on_device(t):
             return t, False
-        return t.to(torch.device("cuda", device_id)), True
+        return t.to(torch.device(device_type, device_id)), True
+
+    def _ensure_xpu_device():
+        """Ensure the correct XPU device is set for the current thread.
+
+        The C++ engine thread may call into Python callbacks without having
+        the correct default device set.  This re-sets it using the stored
+        local_rank so that subsequent tensor operations target the right GPU.
+        """
+        from rtp_llm.device.device_type import is_xpu
+        if is_xpu():
+            torch.xpu.set_device(local_rank)
 
     def cpp_broadcast(tensors: List[torch.Tensor], root: int, mode: int) -> None:
-        """Broadcast tensors from root rank to all ranks in the group.
-
-        Args:
-            tensors: Tensors to broadcast, each is broadcast in-place from root.
-            root: Source rank that holds the data.
-            mode: ParallelMode int (0=TP, 1=DP, 2=DP_AND_TP) selecting process group.
-        """
+        """Broadcast tensors from root rank to all ranks in the group."""
+        _ensure_xpu_device()
         pg = mode_to_group.get(mode)
         if pg is None or pg.size() < 2:
             return
         global_root = torch.distributed.get_global_rank(pg, root)
-        device_id = torch.cuda.current_device()
         for t in tensors:
-            gpu_t, was_cpu = _ensure_cuda(t, device_id)
-            torch.distributed.broadcast(gpu_t, global_root, group=pg)
-            if was_cpu:
-                t.copy_(gpu_t)
+            if _is_on_device(t):
+                torch.distributed.broadcast(t, global_root, group=pg)
+            else:
+                # Use gloo for CPU tensors (no GPU staging needed).
+                gloo_pg = gloo_mode_to_group.get(mode)
+                if gloo_pg is not None:
+                    torch.distributed.broadcast(t, global_root, group=gloo_pg)
+                else:
+                    device_type, device_id = _get_device_info()
+                    gpu_t = t.to(torch.device(device_type, device_id))
+                    torch.distributed.broadcast(gpu_t, global_root, group=pg)
+                    t.copy_(gpu_t)
 
     _REDUCE_OPS = {
         0: torch.distributed.ReduceOp.SUM,
@@ -323,14 +445,15 @@ def _register_process_groups_to_cpp():
         Returns:
             The reduced tensor (dest if provided, otherwise tensor).
         """
+        _ensure_xpu_device()
         pg = mode_to_group.get(mode)
         if pg is None or pg.size() < 2:
             return tensor if dest is None else tensor
         target = dest if dest is not None else tensor
         if dest is not None:
             target.copy_(tensor)
-        device_id = torch.cuda.current_device()
-        gpu_t, was_cpu = _ensure_cuda(target, device_id)
+        device_type, device_id = _get_device_info()
+        gpu_t, was_cpu = _ensure_device(target, device_type, device_id)
         torch.distributed.all_reduce(
             gpu_t, op=_REDUCE_OPS.get(op, torch.distributed.ReduceOp.SUM), group=pg
         )
@@ -353,20 +476,20 @@ def _register_process_groups_to_cpp():
             inplace: If True, each rank's send data is extracted from its slice in recv_buffers;
                      if False, send data comes from send_buffers.
         """
+        _ensure_xpu_device()
         pg = mode_to_group.get(mode)
         if pg is None or pg.size() < 2:
             return
-        device_id = torch.cuda.current_device()
+        device_type, device_id = _get_device_info()
         rank = pg.rank()
         world_size = pg.size()
         for i, recv_buf in enumerate(recv_buffers):
             data_num = recv_buf.numel() // world_size
-            recv_on_cpu = not recv_buf.is_cuda
-            gpu_recv = (
-                recv_buf.to(torch.device("cuda", device_id))
-                if recv_on_cpu
-                else recv_buf
-            )
+            recv_on_cpu = not _is_on_device(recv_buf)
+            if recv_on_cpu:
+                gpu_recv = recv_buf.to(torch.device(device_type, device_id))
+            else:
+                gpu_recv = recv_buf
             gpu_recv_flat = gpu_recv.reshape(-1)
             if inplace:
                 send_tensor = gpu_recv_flat.narrow(
@@ -374,7 +497,7 @@ def _register_process_groups_to_cpp():
                 ).contiguous()
             else:
                 send_t = send_buffers[i]
-                send_tensor, _ = _ensure_cuda(send_t, device_id)
+                send_tensor, _ = _ensure_device(send_t, device_type, device_id)
             torch.distributed.all_gather_into_tensor(
                 gpu_recv_flat, send_tensor, group=pg
             )
@@ -426,7 +549,7 @@ def destroy_distributed_environment():
     After calling this function, init_distributed_environment() can be called again
     to reinitialize the distributed environment.
     """
-    global _group_map, _parallelism_config, _initialized
+    global _group_map, _gloo_group_map, _parallelism_config, _initialized
 
     rank = torch.distributed.get_rank()
     logging.info(f"[rank: {rank}] Destroying distributed environment")
@@ -457,6 +580,7 @@ def destroy_distributed_environment():
     if torch.distributed.is_initialized():
         torch.distributed.destroy_process_group()
     _group_map.clear()
+    _gloo_group_map.clear()
     logging.info(f"[rank: {rank}] Distributed environment destroyed")
     _parallelism_config = None
     _initialized = False

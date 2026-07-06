@@ -26,7 +26,16 @@ FIFOScheduler::FIFOScheduler(const RuntimeConfig&                   runtime_conf
     max_seq_len_(model_config.max_seq_len),
     max_batch_tokens_size_(runtime_config.fifo_scheduler_config.max_batch_tokens_size),
     max_generate_batch_size_(runtime_config.max_generate_batch_size),
-    need_fill_fake_stream_(parallelism_config.dp_size > 1 && parallelism_config.tp_rank == 0),
+    need_fill_fake_stream_(
+#if USING_XPU
+        // XPU TP needs fake-stream polling to keep ranks in lockstep. On CUDA/ROCm this
+        // would add a 10ms poll to single-DP multi-TP deployments, so keep the upstream
+        // dp_size-only condition there.
+        (parallelism_config.dp_size > 1 || parallelism_config.tp_size > 1)
+#else
+        parallelism_config.dp_size > 1
+#endif
+            && parallelism_config.tp_rank == 0),
     metrics_reporter_(metrics_reporter) {
     RTP_LLM_LOG_INFO("max_generate_batch_size is [%d], max_batch_tokens_size is [%d]",
                      max_generate_batch_size_,

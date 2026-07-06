@@ -312,6 +312,16 @@ class OpenaiEndpoint(object):
         aux_info = None
         extra_outputs = None
         async for response in choice_generator:
+            # Per the Chat Completions streaming protocol, a chunk that
+            # carries `usage` arrives with `choices=[]` after the chunk that
+            # contained `finish_reason`. Capture usage/aux_info/extra_outputs
+            # first so usage-only chunks are accounted for, then skip the
+            # per-choice merge below.
+            usage = response.usage or usage
+            aux_info = response.aux_info or aux_info
+            extra_outputs = response.extra_outputs or extra_outputs
+            if not response.choices:
+                continue
             if len(response.choices) != len(all_choices):
                 if all_choices == []:
                     all_choices = [
@@ -319,7 +329,8 @@ class OpenaiEndpoint(object):
                             index=i,
                             message=ChatMessage(
                                 role=choice.delta.role or RoleEnum.assistant,
-                                content=choice.delta.content or None,
+                                content=choice.delta.content,
+                                reasoning_content=choice.delta.reasoning_content,
                                 function_call=choice.delta.function_call or None,
                                 tool_calls=choice.delta.tool_calls or None,
                             ),
@@ -335,22 +346,16 @@ class OpenaiEndpoint(object):
                     )
             else:
                 for i in range(len(all_choices)):
-                    if all_choices[i].message.content == None:
-                        all_choices[i].message.content = (
-                            response.choices[i].delta.content or None
-                        )
-                    else:
-                        all_choices[i].message.content += (
-                            response.choices[i].delta.content or ""
-                        )
-                    if all_choices[i].message.reasoning_content == None:
-                        all_choices[i].message.reasoning_content = (
-                            response.choices[i].delta.reasoning_content or None
-                        )
-                    else:
-                        all_choices[i].message.reasoning_content += (
-                            response.choices[i].delta.reasoning_content or ""
-                        )
+                    delta_content = response.choices[i].delta.content
+                    if all_choices[i].message.content is None:
+                        all_choices[i].message.content = delta_content
+                    elif delta_content is not None:
+                        all_choices[i].message.content += delta_content
+                    delta_reasoning = response.choices[i].delta.reasoning_content
+                    if all_choices[i].message.reasoning_content is None:
+                        all_choices[i].message.reasoning_content = delta_reasoning
+                    elif delta_reasoning is not None:
+                        all_choices[i].message.reasoning_content += delta_reasoning
                     all_choices[i].message.role = (
                         response.choices[i].delta.role or all_choices[i].message.role
                     )
@@ -375,9 +380,6 @@ class OpenaiEndpoint(object):
                             ].logprobs.content
                     else:
                         all_choices[i].logprobs = response.choices[i].logprobs
-            usage = response.usage or usage
-            aux_info = response.aux_info or aux_info
-            extra_outputs = response.extra_outputs or extra_outputs
 
         if usage == None:
             logging.warning(f"No usage returned from stream response. use empty value.")
@@ -409,11 +411,18 @@ class OpenaiEndpoint(object):
         choice_generator: AsyncGenerator[StreamResponseObject, None],
         debug_info: Optional[DebugInfo],
         tokenizer: Optional[Any] = None,
+        include_usage: Optional[bool] = None,
     ) -> CompleteResponseAsyncGenerator:
         async def response_generator():
             debug_info_responded = False
+            # Track last-seen usage so we can emit a trailing chunk even
+            # when usage and finish_reason arrive on different chunks.
+            last_usage = None
 
             async for response in choice_generator:
+                if response.usage is not None:
+                    last_usage = response.usage
+
                 output = None
                 if (
                     debug_info is not None
@@ -427,14 +436,46 @@ class OpenaiEndpoint(object):
                         for output_ids in response.extra_outputs.output_ids
                     ]
 
+                # See StreamOptions for include_usage semantics.
+                if include_usage is not None:
+                    # include_usage=True/False: suppress per-chunk usage
+                    # and skip backend usage-only frames (choices=[]).
+                    # When True, a trailing choices=[] usage chunk is
+                    # emitted after the loop (see below).
+                    if not response.choices:
+                        continue
+                    yield ChatCompletionStreamResponse(
+                        choices=response.choices,
+                        usage=None,
+                        aux_info=response.aux_info,
+                        debug_info=debug_info if not debug_info_responded else output,
+                        extra_outputs=response.extra_outputs,
+                    )
+                    debug_info_responded = True
+                else:
+                    # include_usage is None: legacy bundled behavior.
+                    yield ChatCompletionStreamResponse(
+                        choices=response.choices,
+                        usage=response.usage,
+                        aux_info=response.aux_info,
+                        debug_info=debug_info if not debug_info_responded else output,
+                        extra_outputs=response.extra_outputs,
+                    )
+                    debug_info_responded = True
+
+            # Trailing usage chunk: emitted after the stream is fully
+            # drained so it is always the final chunk on the wire and
+            # carries the last-seen usage. This is correct for n>=2 where
+            # choices finish on different chunks -- the usage emit must
+            # not happen mid-stream when only some choices have finished.
+            if include_usage is True and last_usage is not None:
                 yield ChatCompletionStreamResponse(
-                    choices=response.choices,
-                    usage=response.usage,
-                    aux_info=response.aux_info,
-                    debug_info=debug_info if not debug_info_responded else output,
-                    extra_outputs=response.extra_outputs,
+                    choices=[],
+                    usage=last_usage,
+                    aux_info=None,
+                    debug_info=None,
+                    extra_outputs=None,
                 )
-                debug_info_responded = True
 
         complete_response_collect_func = partial(
             OpenaiEndpoint._collect_complete_response,
@@ -521,8 +562,19 @@ class OpenaiEndpoint(object):
             chat_request,
         )
 
+        # stream_options only applies to streaming responses. For the
+        # non-streaming (stream=False) path the collect aggregator needs the
+        # legacy bundled `usage` to be present on the finish chunk, otherwise
+        # `include_usage=False` would silently drop usage from the final
+        # ChatCompletionResponse. Force include_usage=None (legacy bundle)
+        # whenever the client did not request a streaming response.
+        include_usage = (
+            chat_request.stream_options.include_usage
+            if chat_request.stream and chat_request.stream_options is not None
+            else None
+        )
         return self._complete_stream_response(
-            choice_generator, debug_info, self.tokenizer
+            choice_generator, debug_info, self.tokenizer, include_usage
         )
 
     def _prepare_chat_input(self, request_id: int, chat_request):

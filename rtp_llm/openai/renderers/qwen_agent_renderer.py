@@ -176,7 +176,10 @@ class QwenAgentRenderer(CustomChatRenderer):
             output_str = output_str.replace(stop_word, "")
         return ProcessedOutput(output_str, output_length, finish_reason)
 
-    async def render_response_stream(
+    # Override only the body -- base class CustomChatRenderer.render_response_stream
+    # owns the min_new_tokens ContextVar bind/reset lifecycle, so subclasses do
+    # not need to import private symbols or duplicate the try/finally pattern.
+    async def _render_response_stream_body(
         self,
         output_generator: AsyncGenerator[GenerateOutputs, None],
         request: ChatCompletionRequest,
