@@ -95,6 +95,7 @@ requirement([
     "torch",
     "torchvision",
     "triton",
+    "triton-kernels",
     "numpy",
     "safetensors",
     "einops",
@@ -294,7 +295,7 @@ py_library(
         "@//:using_cpu": [],
         "@//:using_cuda12_arm": [],
         "//conditions:default": []
-    }) + triton_deps(["triton"]) + internal_deps(),
+    }) + internal_deps(),
 )
 
 py_library(
@@ -519,6 +520,7 @@ py_library(
             ":embedding",
             "//rtp_llm/tools/convert:convert",
             ":aiter",
+            ":triton-kernels",
         ],
         "//conditions:default": [
             ":models",

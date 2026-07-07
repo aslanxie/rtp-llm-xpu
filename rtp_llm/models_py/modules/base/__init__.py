@@ -46,6 +46,7 @@ elif device_type == DeviceType.ROCm:
     from rtp_llm.models_py.modules.base.rocm.norm import (
         AddBiasResLayerNorm,
         FusedQKRMSNorm,
+        LayerNorm,
         QKRMSNorm,
         RMSNorm,
         RMSResNorm,
